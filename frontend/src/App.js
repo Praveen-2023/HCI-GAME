@@ -21,10 +21,10 @@ import SchedulePage from "./pages/doctor/SchedulePage";
 import DoctorCaretakerManagement from "./pages/doctor/DoctorCaretakerManagement";
 
 import CaretakerDashboard from "./pages/caretaker/CaretakerDashboard";
-import PianoReactionGame from "./pages/game/PianoReactionGame";
-import ShapeTracingGame from "./pages/game/ShapeTracingGame";
-import BoardDrawingGame from "./pages/game/BoardDrawingGame";
-import FruitBasketGame from "./pages/game/FruitBasketGame";
+import PianoReactionGame from "./pages/game/PianoReactionGame/PianoReactionGame";
+import ShapeTracingGame from "./pages/game/ShapeTracingGame/ShapeTracingGame";
+import BoardDrawingGame from "./pages/game/BoardDrawingGame/BoardDrawingGame";
+import FruitBasketGame from "./pages/game/FruitBasketGame/FruitBasketGame";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import CreatePatientForm from "./components/admin/CreatePatientForm";
 import DoctorProfileForm from "./pages/doctor/DoctorProfileForm";

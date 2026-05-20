@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../../context/AuthContext";
-import { gameService } from "../../services/gameService";
+import { useAuth } from "../../../context/AuthContext";
+import { gameService } from "../../../services/gameService";
+import gameSessionBuffer from "../../../services/gameSessionBuffer";
+import SaveExitButton from "../SaveExitButton";
 import {
   Play,
   Pause,
@@ -598,6 +600,9 @@ const PianoReactionGame = () => {
     setFeedbackSection(null);
     setFeedbackType(null);
     setSectionStartTime(Date.now());
+    // Init local session buffer
+    gameSessionBuffer.init('type1', 'Piano Reaction Game');
+    gameSessionBuffer.update({ levelspan: currentLevelSpan });
     showNextSection();
   };
 
@@ -684,6 +689,8 @@ const PianoReactionGame = () => {
       correct,
     };
     setPlayData((prev) => [...prev, entry]);
+    // Buffer locally
+    gameSessionBuffer.addPlayEntry(entry);
     console.log(
       `Key: ${shownKey}, User: ${userResponse}, Time: ${responsetime}s, Correct: ${correct}`,
     );
@@ -705,34 +712,41 @@ const PianoReactionGame = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // End game and save session
-  const endGame = async () => {
+  // End current round (does NOT save to backend)
+  const endGame = () => {
     setIsPlaying(false);
     setCurrentSection(null);
     if (sectionTimerRef.current) clearTimeout(sectionTimerRef.current);
     if (playData.length === 0) {
-      alert("No data to save. Play at least one round!");
+      alert("No data recorded. Play at least one round!");
       return;
     }
-    try {
-      const response = await gameService.saveGameSession({
-        levelspan: currentLevelSpan,
-        numsections: currentNumSections,
-        playData,
-      });
-      alert(
-        `Game session saved!\nScore: ${response.sessionScore}\nTotal Score: ${response.totalScore}\nLevel: ${response.level}`,
-      );
-      const playAgain = window.confirm("Play another round?");
-      if (playAgain) {
-        startGame();
-      } else {
-        navigate(-1);
-      }
-    } catch (error) {
-      console.error("Failed to save session:", error);
-      alert("Failed to save game session. Please try again.");
+    // Update local buffer with score
+    const calculatedScore = playData.reduce((acc, p) => {
+      if (p.correct === 1) return acc + 10;
+      if (p.correct === -1) return acc - 5;
+      return acc;
+    }, 0);
+    const finalScore = Math.max(0, calculatedScore);
+    gameSessionBuffer.update({ sessionScore: finalScore });
+
+    const playAgain = window.confirm(
+      `Round complete! Score: ${finalScore}\n\nPlay another round?\n(Use the 💾 Save & Exit button when you're done to save all data.)`
+    );
+    if (playAgain) {
+      startGame();
     }
+  };
+
+  // Finalize buffer data right before Save & Exit pushes to backend
+  const handleBeforeSave = () => {
+    const calculatedScore = playData.reduce((acc, p) => {
+      if (p.correct === 1) return acc + 10;
+      if (p.correct === -1) return acc - 5;
+      return acc;
+    }, 0);
+    const finalScore = Math.max(0, calculatedScore);
+    gameSessionBuffer.update({ sessionScore: finalScore });
   };
 
   const pauseGame = () => {
@@ -1176,6 +1190,7 @@ const PianoReactionGame = () => {
           </div>
         )}
       </div>
+      <SaveExitButton onBeforeSave={handleBeforeSave} />
     </div>
   );
 };

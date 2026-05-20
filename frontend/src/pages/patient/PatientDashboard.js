@@ -391,6 +391,38 @@ const DarkModeToggle = ({ isDarkMode, setIsDarkMode, collapsed }) => (
   </div>
 );
 
+const CoordinateVisualizer = ({ coordinates }) => {
+  if (!coordinates || coordinates.length === 0) return null;
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 border dark:border-gray-700 mt-6 shadow-sm">
+      <h3 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-4">
+        Movement Pattern (Last Session)
+      </h3>
+      <div className="relative w-full aspect-video bg-gray-50 dark:bg-gray-900 rounded-lg overflow-hidden border dark:border-gray-800">
+        <svg viewBox="0 0 100 100" className="w-full h-full" preserveAspectRatio="none">
+          <polyline
+            points={coordinates.map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
+            fill="none"
+            stroke="#10B981"
+            strokeWidth="0.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {coordinates.map((p, i) => (
+            <circle key={i} cx={p.x * 100} cy={p.y * 100} r={i === 0 || i === coordinates.length - 1 ? "1.5" : "0.5"} fill={i === 0 ? "#3B82F6" : i === coordinates.length - 1 ? "#EF4444" : "#10B981"} />
+          ))}
+        </svg>
+        <div className="absolute top-2 left-2 flex gap-3 text-xs bg-white/80 dark:bg-black/50 p-1.5 rounded-md backdrop-blur-sm shadow-sm border border-white/20 dark:border-white/10">
+          <span className="flex items-center gap-1 text-gray-700 dark:text-gray-300 font-medium"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Start</span>
+          <span className="flex items-center gap-1 text-gray-700 dark:text-gray-300 font-medium"><div className="w-2 h-2 rounded-full bg-green-500"></div> Path</span>
+          <span className="flex items-center gap-1 text-gray-700 dark:text-gray-300 font-medium"><div className="w-2 h-2 rounded-full bg-red-500"></div> End</span>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Extracted Dashboard content into its own component
 const DashboardContent = ({
   userData,
@@ -406,6 +438,10 @@ const DashboardContent = ({
   const [reminders, setReminders] = useState([]);
   const [selectedPeriod, setSelectedPeriod] = useState("today");
   const [isMounted, setIsMounted] = useState(false);
+  
+  // Game Selector State
+  const defaultGameType = stats?.games?.[0]?.type || "type1";
+  const [selectedGameType, setSelectedGameType] = useState(defaultGameType);
 
   useEffect(() => {
     setIsMounted(true);
@@ -414,10 +450,14 @@ const DashboardContent = ({
   const [editingReminder, setEditingReminder] = useState(null);
 
   // Computations for charts - moved inside DashboardContent
-  const recentSessions = useMemo(
-    () => stats?.recentSessions || (stats?.play ? [stats] : []),
-    [stats],
-  );
+  const recentSessions = useMemo(() => {
+    if (stats?.games && stats.games.length > 0) {
+      const selectedGame = stats.games.find(g => g.type === selectedGameType) || stats.games[0];
+      return selectedGame.recentSessions || [];
+    }
+    return stats?.recentSessions || (stats?.play ? [stats] : []);
+  }, [stats, selectedGameType]);
+  
   const today = useMemo(() => new Date(), []); // Stable reference for calculations
 
   const totals = useMemo(
@@ -735,6 +775,22 @@ const DashboardContent = ({
           <p className="text-gray-500 dark:text-gray-400 mt-1 font-medium italic">
             How are you feeling today?
           </p>
+          
+          {/* Game Stats Selector */}
+          {stats?.games && stats.games.length > 0 && (
+            <div className="mt-4 flex items-center gap-3">
+              <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">View stats for:</span>
+              <select
+                value={selectedGameType}
+                onChange={(e) => setSelectedGameType(e.target.value)}
+                className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              >
+                {stats.games.map(g => (
+                  <option key={g.type} value={g.type}>{g.name || g.type}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
         {/* Right side: Streak, Theme, Search, Notifications */}
         <div className="flex items-center gap-3">
@@ -1270,7 +1326,6 @@ const DashboardContent = ({
                       )}
                     </div>
 
-                    {/* Performance Indicator */}
                     <div className="mt-8 p-6 bg-primary-50/50 dark:bg-primary-900/10 rounded-2xl border border-primary-100 dark:border-primary-900/20 flex items-start gap-4">
                       <div className="bg-white dark:bg-gray-800 p-2.5 rounded-xl shadow-sm">
                         <AlertCircle className="w-6 h-6 text-primary-500" />
@@ -1290,6 +1345,8 @@ const DashboardContent = ({
                         </p>
                       </div>
                     </div>
+
+                    <CoordinateVisualizer coordinates={recentSessions[selectedSession]?.session?.coordinates || recentSessions[selectedSession]?.coordinates} />
                   </div>
                 ) : (
                   <div className="text-center py-16">

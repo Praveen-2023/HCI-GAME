@@ -2,22 +2,141 @@ import { Hands } from "@mediapipe/hands";
 import { Pose } from "@mediapipe/pose";
 import { Camera } from "@mediapipe/camera_utils";
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useAuth } from "../../context/AuthContext";
+import { useAuth } from "../../../context/AuthContext";
+import gameSessionBuffer from "../../../services/gameSessionBuffer";
+import SaveExitButton from "../SaveExitButton";
 // ==================== CONFIGURATION ====================
 const CONFIG = {
   SESSION_SECONDS: 300,
   CALIBRATION_SECONDS: 7,
-  GRID_ROWS: 3,
-  GRID_COLS: 3,
+  NUM_SHAPE_POINTS: 20,
   PICK_DISTANCE: 0.08,
-  DROP_DISTANCE: 0.1,
-  SCORE_PER_DROP: 10,
+  TRACE_TOLERANCE: 0.05,
+  SCORE_PER_SHAPE: 10,
+  MIN_COMPLETION: 0.8, // 80% points hit for success
   SMOOTH_ALPHA: 0.7,
   STABLE_FRAMES: 2,
   DRAW_FPS: 30,
 };
+
+// ==================== SHAPE GENERATION ====================
+const SHAPES = [
+  "circle",
+  "ellipse",
+  "triangle",
+  "square",
+  "hexagon",
+  "star",
+  "heart",
+  "diamond",
+];
+
+const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+
+const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
+  const centerX = 0.5;
+  const centerY = 0.5;
+  let radius = 0.35;
+  const points = [];
+  const angleStep = (2 * Math.PI) / numPoints;
+  for (let i = 0; i < numPoints; i++) {
+    let theta = i * angleStep;
+    let x, y;
+    switch (type) {
+      case "circle":
+        x = centerX + radius * Math.cos(theta);
+        y = centerY + radius * Math.sin(theta);
+        break;
+      case "ellipse":
+        x = centerX + radius * 1.5 * Math.cos(theta);
+        y = centerY + radius * 0.8 * Math.sin(theta);
+        break;
+      case "triangle":
+        theta += Math.PI / 2; // Start at top
+        x = centerX + radius * Math.cos(theta);
+        y = centerY + radius * Math.sin(theta);
+        break;
+      case "square":
+        const t = i / numPoints;
+        const sideFrac = 0.25;
+        let frac = t;
+        let px, py;
+        if (frac < sideFrac) {
+          px = -0.5 + frac / sideFrac;
+          py = -0.5;
+        } else if (frac < 2 * sideFrac) {
+          px = 0.5;
+          py = -0.5 + (frac - sideFrac) / sideFrac;
+        } else if (frac < 3 * sideFrac) {
+          px = 0.5 - (frac - 2 * sideFrac) / sideFrac;
+          py = 0.5;
+        } else {
+          px = -0.5;
+          py = 0.5 - (frac - 3 * sideFrac) / sideFrac;
+        }
+        x = centerX + radius * px;
+        y = centerY + radius * py;
+        break;
+      case "hexagon":
+        theta += Math.PI / 6; // Flat top
+        x = centerX + radius * Math.cos(theta);
+        y = centerY + radius * Math.sin(theta);
+        break;
+      case "star":
+        const rInner = radius * 0.4;
+        const rOuter = radius;
+        const r = i % 2 === 0 ? rOuter : rInner;
+        x = centerX + r * Math.cos(theta - Math.PI / 2);
+        y = centerY + r * Math.sin(theta - Math.PI / 2);
+        break;
+      case "heart":
+        const t_h = (i / numPoints) * 2 * Math.PI;
+        // parametric heart: x = 16 sin^3(t), y = 13 cos(t) - 5 cos(2t) - 2 cos(3t) - cos(4t)
+        const hx = 16 * Math.pow(Math.sin(t_h), 3);
+        const hy = -(
+          13 * Math.cos(t_h) -
+          5 * Math.cos(2 * t_h) -
+          2 * Math.cos(3 * t_h) -
+          Math.cos(4 * t_h)
+        );
+        x = centerX + (hx / 16) * radius;
+        y = centerY + (hy / 16) * radius + 0.05; // Slightly offset up
+        break;
+      case "diamond":
+        const td = i / numPoints;
+        if (td < 0.25) {
+          // Top to Right
+          x = centerX + (td / 0.25) * radius;
+          y = centerY - (1 - td / 0.25) * radius;
+        } else if (td < 0.5) {
+          // Right to Bottom
+          x = centerX + (1 - (td - 0.25) / 0.25) * radius;
+          y = centerY + ((td - 0.25) / 0.25) * radius;
+        } else if (td < 0.75) {
+          // Bottom to Left
+          x = centerX - ((td - 0.5) / 0.25) * radius;
+          y = centerY + (1 - (td - 0.5) / 0.25) * radius;
+        } else {
+          // Left to Top
+          x = centerX - (1 - (td - 0.75) / 0.25) * radius;
+          y = centerY - ((td - 0.75) / 0.25) * radius;
+        }
+        break;
+      default:
+        x = centerX + radius * Math.cos(theta);
+        y = centerY + radius * Math.sin(theta);
+    }
+    // Final Clamp to ensure boundaries
+    points.push({
+      x: clamp(x, 0.05, 0.95),
+      y: clamp(y, 0.05, 0.95),
+    });
+  }
+  return points;
+};
+
 // ==================== MAIN COMPONENT ====================
-const FruitBasketGame = () => {
+const BoardDrawingGame = () => {
   const { isDarkMode } = useAuth();
   // State Management
   const [isInitialized, setIsInitialized] = useState(false);
@@ -101,12 +220,14 @@ const FruitBasketGame = () => {
     centerX: 0.5,
     centerY: 0.5,
     maxReachNorm: 0.2,
+    level: 1,
   });
 
-  const gridHolesRef = useRef([]);
-  const fruitRef = useRef(null);
-  const basketIdxRef = useRef(null);
+  const shapeRef = useRef(null);
+  const currentTargetIdxRef = useRef(0);
+  const drawnPathRef = useRef([]);
   const lastPoseResultsRef = useRef(null);
+
   // ==================== UTILITY FUNCTIONS ====================
   const distNorm = (a, b) => {
     if (!a || !b) return 999;
@@ -133,47 +254,48 @@ const FruitBasketGame = () => {
     setStatusMessage({ text: msg, visible: true });
     setTimeout(() => setStatusMessage({ text: "", visible: false }), duration);
   };
-  // ==================== SETUP GRID ====================
-  const setupGrid = useCallback(() => {
-    const holes = [];
-    const marginX = 0.15,
-      marginY = 0.15;
 
-    for (let r = 0; r < CONFIG.GRID_ROWS; r++) {
-      for (let c = 0; c < CONFIG.GRID_COLS; c++) {
-        const x = marginX + (c / (CONFIG.GRID_COLS - 1)) * (1 - 2 * marginX);
-        const y = marginY + (r / (CONFIG.GRID_ROWS - 1)) * (1 - 2 * marginY);
-        holes.push({ id: r * CONFIG.GRID_COLS + c, x, y });
-      }
-    }
-    gridHolesRef.current = holes;
-  }, []);
-  // ==================== SPAWN FRUIT ====================
-  const spawnFruit = useCallback(() => {
-    let sourceIdx = Math.floor(Math.random() * gridHolesRef.current.length);
-    let bIdx = Math.floor(Math.random() * gridHolesRef.current.length);
-    while (bIdx === sourceIdx) {
-      bIdx = Math.floor(Math.random() * gridHolesRef.current.length);
+  // ==================== SPAWN SHAPE ====================
+  const pickNewShape = useCallback(() => {
+    // Determine shape by level
+    const level = calibrationRef.current.level || 1;
+    let shapeType;
+    if (level <= SHAPES.length) {
+      shapeType = SHAPES[level - 1];
+    } else {
+      shapeType = SHAPES[Math.floor(Math.random() * SHAPES.length)];
     }
 
-    basketIdxRef.current = bIdx;
-    fruitRef.current = {
-      id: `F${Date.now()}`,
-      sourceIdx,
-      x: gridHolesRef.current[sourceIdx].x,
-      y: gridHolesRef.current[sourceIdx].y,
-      attachedTo: null,
+    const points = generateShapePoints(shapeType);
+    shapeRef.current = {
+      type: shapeType,
+      points,
+      drawingHand: null,
+      startTime: Date.now(),
     };
+    currentTargetIdxRef.current = 0;
+    drawnPathRef.current = [];
+    setStatusMessage({
+      text: `Level ${level}: Trace the ${shapeType.toUpperCase()}`,
+      visible: true,
+    });
+    setTimeout(
+      () => setStatusMessage((prev) => ({ ...prev, visible: false })),
+      2000,
+    );
+  }, []);
 
+  const spawnShape = useCallback(() => {
+    pickNewShape();
     logsRef.current.push({
       timestamp: nowSec(),
-      event: "spawn",
-      fruit_id: fruitRef.current.id,
-      source: sourceIdx,
-      basket: bIdx,
+      event: "spawn_shape",
+      shape_type: shapeRef.current.type,
+      num_points: shapeRef.current.points.length,
       score: scoreRef.current,
     });
-  }, []);
+  }, [pickNewShape]);
+
   // ==================== MEDIAPIPE HANDLERS ====================
   const onHandsResults = useCallback((results) => {
     const handState = handStateRef.current;
@@ -275,6 +397,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     setLeftHandClosed(handState.Left.closed);
     setRightHandClosed(handState.Right.closed);
   }, []);
+
   const onPoseResults = useCallback((results) => {
     lastPoseResultsRef.current = results;
     const handState = handStateRef.current;
@@ -321,6 +444,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       }
     }
   }, []);
+
   // ==================== SETUP MEDIAPIPE ====================
   const setupMediaPipe = useCallback(async () => {
     if (handsModuleRef.current || poseModuleRef.current) {
@@ -376,98 +500,133 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       );
     }
   }, [onHandsResults, onPoseResults]);
+
   // ==================== GAME LOGIC ====================
   const gameLogicTick = useCallback(() => {
-    if (!fruitRef.current || !sessionStartRef.current) return;
+    if (!shapeRef.current || !sessionStartRef.current) return;
     const handState = handStateRef.current;
+    const shape = shapeRef.current;
     ["Left", "Right"].forEach((label) => {
       const hand = handState[label];
       if (!hand.smoothPos || !hand.visible) return;
+      const pos = hand.smoothPos;
+      const isDrawing = shape.drawingHand === label;
       if (
-        !fruitRef.current.attachedTo &&
-        hand.closedFrames >= CONFIG.STABLE_FRAMES
+        !shape.drawingHand &&
+        hand.closed &&
+        currentTargetIdxRef.current === 0
       ) {
-        const source = gridHolesRef.current[fruitRef.current.sourceIdx];
-        const dist = distNorm(hand.smoothPos, source);
-
-        if (dist < CONFIG.PICK_DISTANCE) {
-          fruitRef.current.attachedTo = label;
+        if (distNorm(pos, shape.points[0]) < CONFIG.PICK_DISTANCE) {
+          shape.drawingHand = label;
+          drawnPathRef.current = [{ ...pos }];
+          currentTargetIdxRef.current = 1;
           logsRef.current.push({
             timestamp: nowSec(),
-            event: "pick",
-            fruit_id: fruitRef.current.id,
+            event: "start_drawing",
+            shape_type: shape.type,
             hand: label,
-            source: fruitRef.current.sourceIdx,
-            basket: basketIdxRef.current,
           });
-          showStatus(`✊ ${label} hand grasped fruit!`, 1000);
+          showStatus(
+            `✏️ ${label} hand started drawing! Follow the points in order.`,
+            1500,
+          );
         }
-      }
-      if (
-        fruitRef.current.attachedTo === label &&
-        hand.openFrames >= CONFIG.STABLE_FRAMES
-      ) {
-        const basket = gridHolesRef.current[basketIdxRef.current];
-        const dist = distNorm(hand.smoothPos, basket);
-
-        if (dist < CONFIG.DROP_DISTANCE) {
-          const newScore = scoreRef.current + CONFIG.SCORE_PER_DROP;
-          setScore(newScore);
-          scoreRef.current = newScore;
-          setReps((prev) => prev + 1);
-          successesRef.current++;
-          attemptsRef.current++;
-
-          logsRef.current.push({
-            timestamp: nowSec(),
-            event: "drop_success",
-            fruit_id: fruitRef.current.id,
-            hand: label,
-            source: fruitRef.current.sourceIdx,
-            basket: basketIdxRef.current,
-            score: newScore,
-          });
-
-          const newRate = (
-            (successesRef.current / attemptsRef.current) *
-            100
-          ).toFixed(0);
-          setSuccessRate(newRate);
-
-          showStatus(`✅ Success! +${CONFIG.SCORE_PER_DROP} points`, 1500);
-          spawnFruit();
+      } else if (isDrawing) {
+        if (hand.closed) {
+          drawnPathRef.current.push({ ...pos });
+          // Advance targets if close
+          while (
+            currentTargetIdxRef.current < shape.points.length &&
+            distNorm(pos, shape.points[currentTargetIdxRef.current]) <
+            CONFIG.TRACE_TOLERANCE
+          ) {
+            currentTargetIdxRef.current++;
+          }
+          if (currentTargetIdxRef.current >= shape.points.length) {
+            showStatus(
+              "All points reached! Open hand to complete the shape.",
+              1000,
+            );
+          }
         } else {
-          attemptsRef.current++;
-          fruitRef.current.attachedTo = null;
-          fruitRef.current.x =
-            gridHolesRef.current[fruitRef.current.sourceIdx].x;
-          fruitRef.current.y =
-            gridHolesRef.current[fruitRef.current.sourceIdx].y;
-
+          // Open hand - end drawing
+          shape.drawingHand = null;
+          const hits = currentTargetIdxRef.current;
+          const total = shape.points.length;
+          const completion = hits / total;
           logsRef.current.push({
             timestamp: nowSec(),
-            event: "drop_miss",
-            fruit_id: fruitRef.current.id,
+            event: "end_drawing",
+            shape_type: shape.type,
             hand: label,
-            source: fruitRef.current.sourceIdx,
-            basket: basketIdxRef.current,
+            hits,
+            total,
+            completion,
           });
+          if (completion >= CONFIG.MIN_COMPLETION) {
+            // Shape Success!
+            const newReps = reps + 1;
+            setReps(newReps);
+            const newScore = scoreRef.current + CONFIG.SCORE_PER_SHAPE;
+            setScore(newScore);
+            scoreRef.current = newScore;
+            successesRef.current++;
 
-          const newRate = (
-            (successesRef.current / attemptsRef.current) *
-            100
-          ).toFixed(0);
-          setSuccessRate(newRate);
+            // Advance level every 3 shapes
+            if (newReps % 3 === 0) {
+              calibrationRef.current.level =
+                (calibrationRef.current.level || 1) + 1;
+            }
 
-          showStatus("⚠️ Missed! Release over basket", 1500);
+            pickNewShape();
+            attemptsRef.current++;
+            logsRef.current.push({
+              timestamp: nowSec(),
+              event: "drawing_success",
+              shape_type: shape.type,
+              hand: label,
+              hits,
+              total,
+              score: newScore,
+            });
+            const newRate = (
+              (successesRef.current / attemptsRef.current) *
+              100
+            ).toFixed(0);
+            setSuccessRate(newRate);
+            showStatus(
+              `✅ Shape completed! ${Math.round(completion * 100)}% accuracy +${CONFIG.SCORE_PER_SHAPE} points`,
+              2000,
+            );
+            spawnShape();
+          } else {
+            attemptsRef.current++;
+            logsRef.current.push({
+              timestamp: nowSec(),
+              event: "drawing_fail",
+              shape_type: shape.type,
+              hand: label,
+              hits,
+              total,
+              completion,
+            });
+            const newRate = (
+              (successesRef.current / attemptsRef.current) *
+              100
+            ).toFixed(0);
+            setSuccessRate(newRate);
+            showStatus(
+              `⚠️ Incomplete trace: ${Math.round(completion * 100)}% - Close hand near start to retry.`,
+              2000,
+            );
+            currentTargetIdxRef.current = 0;
+            drawnPathRef.current = [];
+          }
         }
-      }
-      if (fruitRef.current.attachedTo === label) {
-        fruitRef.current.x = hand.smoothPos.x;
-        fruitRef.current.y = hand.smoothPos.y;
       }
     });
-  }, [spawnFruit]);
+  }, [spawnShape, pickNewShape, reps]);
+
   // ==================== DRAWING ====================
   const drawOverlay = useCallback(() => {
     const canvas = overlayRef.current;
@@ -594,6 +753,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       ctx.fillText(`${label} ${stateText}`, pcx + 26, pcy);
     });
   }, []);
+
   const drawGame = useCallback(() => {
     const canvas = gameCanvasRef.current;
     if (!canvas) return;
@@ -603,53 +763,55 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     const w = canvas.width;
     const h = canvas.height;
     const scale = window.devicePixelRatio || 1;
-    gridHolesRef.current.forEach((hole, idx) => {
-      const px = hole.x * w;
-      const py = hole.y * h;
-      const r = Math.max(35 * scale, CONFIG.PICK_DISTANCE * Math.min(w, h));
-      ctx.beginPath();
-      ctx.fillStyle =
-        idx === basketIdxRef.current
-          ? "rgba(180, 255, 180, 0.9)"
-          : "rgba(255, 255, 255, 0.7)";
-      ctx.arc(px, py, r, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = idx === basketIdxRef.current ? "#2f7a2f" : "#999";
+    if (shapeRef.current) {
+      const shape = shapeRef.current;
+      // Draw shape outline
+      ctx.strokeStyle = "#333";
       ctx.lineWidth = 3 * scale;
-      ctx.stroke();
-      ctx.fillStyle = "#000";
-      ctx.font = `${13 * scale}px Arial`;
-      ctx.textAlign = "center";
-      ctx.fillText(
-        idx === basketIdxRef.current ? "🧺" : `${idx}`,
-        px,
-        py + 5 * scale,
-      );
-    });
-    if (fruitRef.current) {
-      const handState = handStateRef.current;
-      let fx, fy;
-      if (
-        fruitRef.current.attachedTo &&
-        handState[fruitRef.current.attachedTo].smoothPos
-      ) {
-        fx = handState[fruitRef.current.attachedTo].smoothPos.x * w;
-        fy = handState[fruitRef.current.attachedTo].smoothPos.y * h;
-      } else {
-        fx = fruitRef.current.x * w;
-        fy = fruitRef.current.y * h;
+      ctx.beginPath();
+      ctx.moveTo(shape.points[0].x * w, shape.points[0].y * h);
+      for (let i = 1; i < shape.points.length; i++) {
+        ctx.lineTo(shape.points[i].x * w, shape.points[i].y * h);
       }
-      ctx.beginPath();
-      ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
-      ctx.arc(fx + 2, fy + 2, 20 * scale, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.fillStyle = "#ff6347";
-      ctx.arc(fx, fy, 20 * scale, 0, Math.PI * 2);
-      ctx.fill();
+      ctx.closePath();
+      ctx.stroke();
 
-      ctx.fillStyle = "#8b4513";
-      ctx.fillRect(fx - 2, fy - 28 * scale, 4, 12 * scale);
+      // Draw points
+      shape.points.forEach((p, i) => {
+        const px = p.x * w;
+        const py = p.y * h;
+        let fillColor =
+          i < currentTargetIdxRef.current
+            ? "#28a745" // green for hit
+            : i === currentTargetIdxRef.current
+              ? "#dc3545" // red for current
+              : "#007bff"; // blue for future
+        ctx.beginPath();
+        ctx.fillStyle = fillColor;
+        ctx.arc(px, py, 8 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2 * scale;
+        ctx.stroke();
+      });
+
+      // Draw drawn path
+      if (drawnPathRef.current.length > 1) {
+        ctx.strokeStyle = shape.drawingHand ? "#ff9500" : "#6c757d"; // orange if active, gray if not
+        ctx.lineWidth = 4 * scale;
+        ctx.beginPath();
+        ctx.moveTo(
+          drawnPathRef.current[0].x * w,
+          drawnPathRef.current[0].y * h,
+        );
+        for (let i = 1; i < drawnPathRef.current.length; i++) {
+          ctx.lineTo(
+            drawnPathRef.current[i].x * w,
+            drawnPathRef.current[i].y * h,
+          );
+        }
+        ctx.stroke();
+      }
     }
     const handState = handStateRef.current;
     ["Left", "Right"].forEach((label) => {
@@ -680,6 +842,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       ctx.fillText(label[0], px, py);
     });
   }, []);
+
   const syncCanvasSizes = useCallback(() => {
     if (overlayRef.current && videoRef.current) {
       if (overlayRef.current.width !== videoRef.current.videoWidth) {
@@ -703,6 +866,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       }
     }
   }, []);
+
   // ==================== MAIN LOOP ====================
   const mainLoop = useCallback(() => {
     const now = Date.now();
@@ -718,6 +882,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     gameLogicTick();
     requestAnimationFrame(mainLoop);
   }, [syncCanvasSizes, drawOverlay, drawGame, gameLogicTick]);
+
   // ==================== EVENT HANDLERS ====================
   const handleStartCalibration = () => {
     calibrationRef.current.active = true;
@@ -750,6 +915,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       });
     }, 1000);
   };
+
   const finishCalibration = () => {
     calibrationRef.current.active = false;
     setIsCalibrating(false);
@@ -777,6 +943,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     });
     showStatus("✓ Calibration complete! Ready to start.");
   };
+
   const handleStartSession = () => {
     if (!calibrationDone) {
       if (!window.confirm("Calibration recommended. Continue anyway?")) return;
@@ -790,8 +957,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     logsRef.current = [];
     sessionStartRef.current = Date.now();
 
-    setupGrid();
-    spawnFruit();
+    spawnShape();
     setTimeRemaining(CONFIG.SESSION_SECONDS);
     setSuccessRate(0);
     setIsSessionActive(true);
@@ -808,9 +974,15 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     }, 1000);
 
     logsRef.current.push({ timestamp: 0, event: "session_start" });
-    showStatus("🎮 Session started! Close hand to grab fruit!", 3000);
+    // Init local session buffer
+    gameSessionBuffer.init('board_drawing', 'Board Drawing');
+    showStatus(
+      "🎮 Session started! Close hand near first point to begin tracing.",
+      3000,
+    );
   };
-  const handleEndSession = () => {
+
+  const handleEndSession = async () => {
     setIsSessionActive(false);
     logsRef.current.push({
       timestamp: nowSec(),
@@ -822,8 +994,23 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       attemptsRef.current > 0
         ? ((successesRef.current / attemptsRef.current) * 100).toFixed(1)
         : 0;
+
+    // Buffer play data locally
+    const playData = logsRef.current.map(log => ({
+      eventName: log.event,
+      score: log.score,
+      hand: log.hand,
+      responsetime: log.timestamp,
+      shapeType: log.shape_type
+    }));
+    gameSessionBuffer.update({
+      sessionScore: scoreRef.current,
+      playData,
+      coordinates: drawnPathRef.current.map(p => ({ x: p.x, y: p.y, timestamp: nowSec() }))
+    });
+
     alert(
-      `Session Complete!\n\nScore: ${scoreRef.current}\nReps: ${reps}\nSuccess Rate: ${successRateVal}%\n\nDownload CSV to save your data.`,
+      `Session Complete!\n\nScore: ${scoreRef.current}\nShapes Completed: ${reps}\nSuccess Rate: ${successRateVal}%\n\nUse the 💾 Save & Exit button to save your data.`,
     );
   };
 
@@ -831,49 +1018,29 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     window.location.reload();
   };
 
-  const handleOverlayMouseMove = (e) => {
-    if (!usingMouseFallbackRef.current) return;
-    const rect = overlayRef.current.getBoundingClientRect();
-    const pos = {
-      x: (e.clientX - rect.left) / rect.width,
-      y: (e.clientY - rect.top) / rect.height,
-    };
-    handStateRef.current.Right.smoothPos = smoothPos(
-      handStateRef.current.Right.smoothPos,
-      pos,
-    );
-    handStateRef.current.Right.visible = true;
-    setRightHandVisible(true);
-  };
-  const handleOverlayMouseDown = () => {
-    if (!usingMouseFallbackRef.current) return;
-    handStateRef.current.Right.closedFrames = CONFIG.STABLE_FRAMES;
-    handStateRef.current.Right.openFrames = 0;
-    handStateRef.current.Right.closed = true;
-    setRightHandClosed(true);
-  };
-  const handleOverlayMouseUp = () => {
-    if (!usingMouseFallbackRef.current) return;
-    handStateRef.current.Right.openFrames = CONFIG.STABLE_FRAMES;
-    handStateRef.current.Right.closedFrames = 0;
-    handStateRef.current.Right.closed = false;
-    setRightHandClosed(false);
-  };
+
+
+
+
+
   // ==================== EFFECTS ====================
   useEffect(() => {
     scoreRef.current = score;
   }, [score]);
+
   useEffect(() => {
     isInitializedRef.current = isInitialized;
   }, [isInitialized]);
+
   useEffect(() => {
     usingMouseFallbackRef.current = usingMouseFallback;
   }, [usingMouseFallback]);
+
   useEffect(() => {
     showDebugRef.current = showDebug;
   }, [showDebug]);
+
   useEffect(() => {
-    setupGrid();
     setupMediaPipe();
 
     const loopId = requestAnimationFrame(mainLoop);
@@ -893,7 +1060,9 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       if (handsModuleRef.current) handsModuleRef.current.close();
       if (poseModuleRef.current) poseModuleRef.current.close();
     };
-  }, [setupGrid, setupMediaPipe, mainLoop]);
+  }, [setupMediaPipe, mainLoop]);
+
+  // ==================== RENDER ====================
   // ==================== RENDER ====================
   const themeStyles = {
     container: {
@@ -940,7 +1109,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     note: {
       ...styles.note,
       background: isDarkMode
-        ? "rgba(31, 41, 55, 0.5)"
+        ? "rgba(0, 0, 0, 0.3)"
         : "rgba(255, 255, 255, 0.5)",
       color: isDarkMode ? "#94a3b8" : "#575f56",
       borderTop: isDarkMode
@@ -955,16 +1124,22 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       color: isDarkMode ? "#4ade80" : "#2f7a2f",
       border: isDarkMode ? "1px solid #4ade80" : "none",
     },
+    actionButton: {
+      ...styles.actionButton,
+      background: isDarkMode ? "#374151" : "#e8e8e8",
+      color: isDarkMode ? "#fff" : "#333",
+    },
   };
 
   return (
     <div style={themeStyles.container}>
       <aside style={themeStyles.panel}>
-        <h1 style={themeStyles.title}>🍏 Fruit Basket</h1>
+        <h1 style={themeStyles.title}>Trace & Master</h1>
         <p style={themeStyles.muted}>
-          Grasp, transport, and release fruits into the basket to improve
-          coordination.
+          A surgical-grade motor rehabilitation module. Follow the patterns with
+          high precision.
         </p>
+
         <div style={themeStyles.videoWrap}>
           <video
             ref={videoRef}
@@ -973,13 +1148,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             muted
             style={styles.video}
           />
-          <canvas
-            ref={overlayRef}
-            style={styles.overlay}
-            onMouseMove={handleOverlayMouseMove}
-            onMouseDown={handleOverlayMouseDown}
-            onMouseUp={handleOverlayMouseUp}
-          />
+          <canvas ref={overlayRef} style={styles.overlay} />
 
           {isCalibrating && (
             <div style={themeStyles.statusMessage}>
@@ -1012,61 +1181,84 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             )}
           </div>
         </div>
+
         <div style={styles.controls}>
           <button
             onClick={handleStartCalibration}
             style={styles.controlButton}
             disabled={isCalibrating}
           >
-            📏 Calibrate
+            📏 Calibrate System
           </button>
           <button onClick={handleStartSession} style={styles.controlButton}>
-            {isSessionActive ? "Pause" : "Start Session"}
+            {isSessionActive ? "⏸ Pause" : "▶️ Start Therapy"}
           </button>
         </div>
+
         <div style={themeStyles.stats}>
           <div style={themeStyles.statItem}>
-            <div style={themeStyles.statLabel}>Score</div>
+            <div style={themeStyles.statLabel}>Total Score</div>
             <div style={themeStyles.statValue}>{score}</div>
           </div>
           <div style={themeStyles.statItem}>
-            <div style={themeStyles.statLabel}>Reps</div>
-            <div style={themeStyles.statValue}>{reps}</div>
+            <div style={themeStyles.statLabel}>Success Rate</div>
+            <div style={themeStyles.statValue}>{Math.round(successRate)}%</div>
           </div>
           <div style={themeStyles.statItem}>
-            <div style={themeStyles.statLabel}>Timer</div>
+            <div style={themeStyles.statLabel}>Session Timer</div>
             <div style={themeStyles.statValue}>{formatTime(timeRemaining)}</div>
           </div>
-          <div style={themeStyles.statItem}>
-            <div style={themeStyles.statLabel}>Success</div>
-            <div style={themeStyles.statValue}>{successRate}%</div>
-          </div>
         </div>
+
         <div style={styles.actions}>
           <button
-            onClick={() => window.history.back()}
-            style={styles.actionButton}
+            onClick={() => {
+              if (gameSessionBuffer.hasPending()) {
+                const discard = window.confirm('You have unsaved data. Discard and quit?');
+                if (discard) { gameSessionBuffer.discard(); window.history.back(); }
+              } else {
+                window.history.back();
+              }
+            }}
+            style={themeStyles.actionButton}
           >
-            Quit
+            Quit Session
           </button>
-          <button onClick={handleReset} style={styles.actionButton}>
+          <button onClick={handleReset} style={themeStyles.actionButton}>
             Reset
           </button>
         </div>
+
         <div style={themeStyles.note}>
-          <strong style={themeStyles.statValue}>Pro-tip:</strong> Watch the
-          skeletal feedback for grip status.
+          <strong style={themeStyles.statValue}>Clinical Focus:</strong> Fine
+          motor precision and distal control.
         </div>
       </aside>
+
       <main style={styles.gameArea}>
         <canvas ref={gameCanvasRef} style={styles.gameCanvas} />
         {statusMessage.visible && (
           <div style={themeStyles.statusMessage}>{statusMessage.text}</div>
         )}
       </main>
+      <SaveExitButton onBeforeSave={() => {
+        const playData = logsRef.current.map(log => ({
+          eventName: log.event,
+          score: log.score,
+          hand: log.hand,
+          responsetime: log.timestamp,
+          shapeType: log.shape_type
+        }));
+        gameSessionBuffer.update({
+          sessionScore: scoreRef.current,
+          playData,
+          coordinates: drawnPathRef.current.map(p => ({ x: p.x, y: p.y }))
+        });
+      }} />
     </div>
   );
 };
+
 // ==================== STYLES ====================
 const styles = {
   container: {
@@ -1301,4 +1493,5 @@ const styles = {
     animation: "slideDown 0.3s ease",
   },
 };
-export default FruitBasketGame;
+
+export default BoardDrawingGame;

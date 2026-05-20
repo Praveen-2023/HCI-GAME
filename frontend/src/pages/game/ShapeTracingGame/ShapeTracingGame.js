@@ -2,11 +2,13 @@ import { Hands } from "@mediapipe/hands";
 import { Pose } from "@mediapipe/pose";
 import { Camera } from "@mediapipe/camera_utils";
 import React, { useState, useEffect, useRef, useCallback } from "react";
-
+import { useAuth } from "../../../context/AuthContext";
+import gameSessionBuffer from "../../../services/gameSessionBuffer";
+import SaveExitButton from "../SaveExitButton";
 // ==================== CONFIGURATION ====================
 const CONFIG = {
   SESSION_SECONDS: 300,
-  CALIBRATION_SECONDS: 7, // Reduced from 20 to 7
+  CALIBRATION_SECONDS: 7,
   NUM_SHAPE_POINTS: 20,
   PICK_DISTANCE: 0.08,
   TRACE_TOLERANCE: 0.03,
@@ -15,11 +17,6 @@ const CONFIG = {
   SMOOTH_ALPHA: 0.5,
   STABLE_FRAMES: 5,
   DRAW_FPS: 30,
-  THEME: {
-    PRIMARY: "#3B82F6",
-    SECONDARY: "#EC4899",
-    ACCENT: "#8B5CF6",
-  },
 };
 
 // ==================== SHAPE GENERATION ====================
@@ -84,7 +81,7 @@ const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
 };
 
 // ==================== MAIN COMPONENT ====================
-const InCamGame = () => {
+const ShapeTracingGame = () => {
   const { user, isDarkMode } = useAuth();
   // State Management
   const [isInitialized, setIsInitialized] = useState(false);
@@ -129,7 +126,6 @@ const InCamGame = () => {
   const isInitializedRef = useRef(isInitialized);
   const usingMouseFallbackRef = useRef(usingMouseFallback);
   const showDebugRef = useRef(showDebug);
-  const isMountedRef = useRef(true);
 
   // Game State Refs
   const handStateRef = useRef({
@@ -173,7 +169,6 @@ const InCamGame = () => {
   const currentTargetIdxRef = useRef(0);
   const drawnPathRef = useRef([]);
   const lastPoseResultsRef = useRef(null);
-  const detectionCounterRef = useRef(0);
 
   // ==================== UTILITY FUNCTIONS ====================
   const distNorm = (a, b) => {
@@ -323,24 +318,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     setLeftHandVisible(handState.Left.visible);
     setRightHandVisible(handState.Right.visible);
     setLeftHandClosed(handState.Left.closed);
-    setLeftHandClosed(handState.Left.closed);
     setRightHandClosed(handState.Right.closed);
-
-    // Auto-finish calibration if hands are detected early
-    if (
-      calibrationRef.current.active &&
-      (handState.Left.visible || handState.Right.visible)
-    ) {
-      detectionCounterRef.current++;
-      if (detectionCounterRef.current > 45) {
-        // ~1.5 seconds at 30fps
-        if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
-        finishCalibration();
-        detectionCounterRef.current = 0;
-      }
-    } else {
-      detectionCounterRef.current = 0;
-    }
   }, []);
 
   const onPoseResults = useCallback((results) => {
@@ -426,30 +404,18 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       cameraRef.current = new Camera(videoRef.current, {
         onFrame: async () => {
           if (!videoRef.current) return;
-          if (
-            isMountedRef.current &&
-            !usingMouseFallbackRef.current &&
-            isInitializedRef.current &&
-            handsModuleRef.current
-          ) {
-            try {
-              await handsModuleRef.current.send({ image: videoRef.current });
-              if (poseModuleRef.current)
-                await poseModuleRef.current.send({ image: videoRef.current });
-            } catch (err) {
-              console.warn("MediaPipe error:", err);
-            }
+          if (!usingMouseFallbackRef.current && isInitializedRef.current) {
+            await handsModuleRef.current.send({ image: videoRef.current });
+            await poseModuleRef.current.send({ image: videoRef.current });
           }
         },
         width: 640,
         height: 480,
       });
       await cameraRef.current.start();
-      if (isMountedRef.current) {
-        setIsInitialized(true);
-        isInitializedRef.current = true;
-        console.log("✓ Camera started successfully");
-      }
+      setIsInitialized(true);
+      isInitializedRef.current = true;
+      console.log("✓ Camera started successfully");
     } catch (e) {
       console.warn("Camera failed:", e);
       alert(
@@ -577,10 +543,9 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
   // ==================== DRAWING ====================
   const drawOverlay = useCallback(() => {
     const canvas = overlayRef.current;
-    if (!canvas || !isMountedRef.current) return;
+    if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const w = canvas.width;
     const h = canvas.height;
@@ -703,6 +668,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
       ctx.fillStyle = hand.closed ? "#ff6b6b" : "#51cf66";
       ctx.font = "bold 14px Arial";
+      ctx.fillText(`Shape: ${shapeRef.current.type}`, 10, 30);
       ctx.fillText(`${label} ${stateText}`, pcx + 26, pcy);
 
       // Draw hand cursor using smoothPos (index tip)
@@ -786,7 +752,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
   }, []);
 
   const syncCanvasSizes = useCallback(() => {
-    if (overlayRef.current && videoRef.current && isMountedRef.current) {
+    if (overlayRef.current && videoRef.current) {
       if (overlayRef.current.width !== videoRef.current.videoWidth) {
         overlayRef.current.width = videoRef.current.videoWidth || 640;
         overlayRef.current.height = videoRef.current.videoHeight || 480;
@@ -796,7 +762,6 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
   // ==================== MAIN LOOP ====================
   const mainLoop = useCallback(() => {
-    if (!isMountedRef.current) return;
     const now = Date.now();
     const drawInterval = 1000 / CONFIG.DRAW_FPS;
 
@@ -817,7 +782,6 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     calibrationRef.current.maxX = 0;
     calibrationRef.current.minY = 1;
     calibrationRef.current.maxY = 0;
-    detectionCounterRef.current = 0;
 
     setIsCalibrating(true);
     setCalibTimeLeft(7); // Changed from CONFIG.CALIBRATION_SECONDS to 7
@@ -835,7 +799,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       setCalibTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(calibIntervalRef.current);
-          clearInterval(checkStableInterval);
+          clearInterval(checkStableInterval); // Clear the checkStableInterval too
           finishCalibration();
           return 0;
         }
@@ -902,13 +866,15 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     }, 1000);
 
     logsRef.current.push({ timestamp: 0, event: "session_start" });
+    // Init local session buffer
+    gameSessionBuffer.init('shape_tracing', 'Shape Tracing');
     showStatus(
       "🎮 Session started! Close hand near first point to begin tracing.",
       3000,
     );
   };
 
-  const handleEndSession = () => {
+  const handleEndSession = async () => {
     setIsSessionActive(false);
     logsRef.current.push({
       timestamp: nowSec(),
@@ -920,8 +886,23 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       attemptsRef.current > 0
         ? ((successesRef.current / attemptsRef.current) * 100).toFixed(1)
         : 0;
+
+    // Buffer play data locally
+    const playData = logsRef.current.map(log => ({
+      eventName: log.event,
+      score: log.score,
+      hand: log.hand,
+      responsetime: log.timestamp,
+      shapeType: log.shape_type
+    }));
+    gameSessionBuffer.update({
+      sessionScore: scoreRef.current,
+      playData,
+      coordinates: drawnPathRef.current.map(p => ({ x: p.x, y: p.y, timestamp: nowSec() }))
+    });
+
     alert(
-      `Session Complete!\n\nScore: ${scoreRef.current}\nShapes Completed: ${reps}\nSuccess Rate: ${successRateVal}%\n\nDownload CSV to save your data.`,
+      `Session Complete!\n\nScore: ${scoreRef.current}\nShapes Completed: ${reps}\nSuccess Rate: ${successRateVal}%\n\nUse the 💾 Save & Exit button to save your data.`,
     );
   };
 
@@ -1040,105 +1021,153 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
     document.addEventListener("keydown", handleKeyDown);
     return () => {
-      isMountedRef.current = false;
       cancelAnimationFrame(loopId);
       document.removeEventListener("keydown", handleKeyDown);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
-      if (cameraRef.current) {
-        try {
-          cameraRef.current.stop();
-        } catch (e) {
-          console.warn("Error stopping camera:", e);
-        }
-      }
+      if (cameraRef.current) cameraRef.current.stop();
       if (handsModuleRef.current) handsModuleRef.current.close();
       if (poseModuleRef.current) poseModuleRef.current.close();
     };
   }, [setupMediaPipe, mainLoop]);
 
   // ==================== RENDER ====================
-  const styles = getStyles(isDarkMode);
+  // --- DYNAMIC STYLES ---
+  const themeStyles = {
+    container: {
+      ...styles.container,
+      background: isDarkMode ? "#000" : "#F4F7FE",
+    },
+    topPanel: {
+      ...styles.topPanel,
+      background: isDarkMode
+        ? "rgba(0, 0, 0, 0.4)"
+        : "rgba(255, 255, 255, 0.8)",
+      borderBottom: isDarkMode
+        ? "1px solid rgba(255, 255, 255, 0.1)"
+        : "1px solid rgba(0, 0, 0, 0.1)",
+    },
+    title: {
+      ...styles.title,
+      color: isDarkMode ? "#4ade80" : "#2f7a2f",
+    },
+    muted: {
+      ...styles.muted,
+      color: isDarkMode ? "#94a3b8" : "#575f56",
+    },
+    calibOverlay: {
+      ...styles.calibOverlay,
+      background: isDarkMode
+        ? "rgba(31, 41, 55, 0.95)"
+        : "rgba(255, 255, 255, 0.95)",
+      color: isDarkMode ? "#fff" : "#000",
+      border: isDarkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "none",
+    },
+    statItem: {
+      ...styles.statItem,
+      background: isDarkMode ? "#111827" : "#f9f9f9",
+      borderColor: isDarkMode ? "#1f2937" : "#eee",
+    },
+    statValue: {
+      ...styles.statValue,
+      color: isDarkMode ? "#4ade80" : "#2f7a2f",
+    },
+    statLabel: {
+      ...styles.statLabel,
+      color: isDarkMode ? "#94a3b8" : "#575f56",
+    },
+    note: {
+      ...styles.note,
+      background: isDarkMode
+        ? "rgba(0, 0, 0, 0.6)"
+        : "rgba(255, 255, 255, 0.1)",
+      color: isDarkMode ? "#94a3b8" : "#575f56",
+      borderTop: isDarkMode
+        ? "1px solid rgba(255, 255, 255, 0.1)"
+        : "1px solid rgba(0, 0, 0, 0.2)",
+    },
+    statusMessage: {
+      ...styles.statusMessage,
+      background: isDarkMode
+        ? "rgba(17, 24, 39, 0.95)"
+        : "rgba(255, 255, 255, 0.95)",
+      color: isDarkMode ? "#4ade80" : "#2f7a2f",
+      border: isDarkMode ? "1px solid #4ade80" : "none",
+    },
+  };
+
   return (
-    <div style={styles.container}>
-      <div style={styles.topPanel}>
+    <div style={themeStyles.container}>
+      {/* Top UI */}
+      <div style={themeStyles.topPanel}>
         <div style={styles.topLeft}>
-          <h1 style={styles.title}>✏️ Shape Tracing – Drawing Rehab</h1>
-          <p style={styles.muted}>
-            Upper limb rehabilitation game: Close hand to start tracing at first
-            point, keep closed to follow points in order, open hand after last
-            point to complete. 5-minute therapeutic session.
+          <h1 style={themeStyles.title}>Precision Drawing</h1>
+          <p style={themeStyles.muted}>
+            Trace the anatomical patterns with your pointer finger.
           </p>
         </div>
         <div style={styles.topRight}>
-          <div style={styles.controls}>
+          <div style={themeStyles.stats}>
+            <div style={themeStyles.statItem}>
+              <div style={themeStyles.statLabel}>Success Rate</div>
+              <div style={themeStyles.statValue}>
+                {Math.round(successRate)}%
+              </div>
+            </div>
+            <div style={themeStyles.statItem}>
+              <div style={themeStyles.statLabel}>Shapes Done</div>
+              <div style={themeStyles.statValue}>{reps}</div>
+            </div>
+            <div style={themeStyles.statItem}>
+              <div style={themeStyles.statLabel}>Timer</div>
+              <div style={themeStyles.statValue}>
+                {formatTime(timeRemaining)}
+              </div>
+            </div>
+          </div>
+          <div style={styles.actions}>
             <button
               onClick={handleStartCalibration}
               style={styles.controlButton}
               disabled={isCalibrating}
             >
-              📏 Start 7s Calibration
+              📏 Calibrate
             </button>
             <button
-              onClick={handleStartSession}
-              style={{ ...styles.controlButton }}
-            // disabled={!calibrationDone || isSessionActive}
+              onClick={() => setIsSessionActive(!isSessionActive)}
+              style={styles.controlButton}
             >
-              ▶️ Start 5min Session
+              {isSessionActive ? "Pause Session" : "Start Session"}
             </button>
-            <label style={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={usingMouseFallback}
-                onChange={handleMouseFallbackChange}
-                style={styles.checkbox}
-              />
-              <span>Use mouse fallback (if webcam fails)</span>
-            </label>
-          </div>
-          <div style={styles.stats}>
-            <div style={styles.statItem}>
-              <div style={styles.statLabel}>Score</div>
-              <div style={styles.statValue}>{score}</div>
-            </div>
-            <div style={styles.statItem}>
-              <div style={styles.statLabel}>Shapes</div>
-              <div style={styles.statValue}>{reps}</div>
-            </div>
-            <div style={styles.statItem}>
-              <div style={styles.statLabel}>Timer</div>
-              <div style={styles.statValue}>{formatTime(timeRemaining)}</div>
-            </div>
-            <div style={styles.statItem}>
-              <div style={styles.statLabel}>Success</div>
-              <div style={styles.statValue}>{successRate}%</div>
-            </div>
-          </div>
-          <div style={styles.actions}>
-            <button onClick={handleDownloadCSV} style={styles.actionButton}>
-              💾 Download CSV
-            </button>
-            <button onClick={handleReset} style={styles.actionButton}>
-              🔄 Reset
+            <button
+              onClick={() => {
+                if (gameSessionBuffer.hasPending()) {
+                  const discard = window.confirm('You have unsaved data. Discard and quit?');
+                  if (discard) { gameSessionBuffer.discard(); window.history.back(); }
+                } else {
+                  window.history.back();
+                }
+              }}
+              style={styles.actionButton}
+            >
+              Quit
             </button>
           </div>
         </div>
       </div>
+
+      {/* Main Video/Game Panel */}
       <div style={styles.videoWrap}>
-        <video ref={videoRef} autoPlay playsInline muted style={styles.video} />
-        <canvas
-          ref={overlayRef}
-          style={styles.overlay}
-          onMouseMove={handleOverlayMouseMove}
-          onMouseDown={handleOverlayMouseDown}
-          onMouseUp={handleOverlayMouseUp}
-        />
+        <video ref={videoRef} style={styles.video} playsInline muted />
+        <canvas ref={overlayRef} style={styles.overlay} />
 
         {isCalibrating && (
-          <div style={styles.calibOverlay}>
-            <div style={styles.calibText}>
-              Calibrating... {calibTimeLeft}s - Move to corners & center!
-            </div>
+          <div style={themeStyles.calibOverlay}>
+            <p style={themeStyles.calibText}>
+              <strong>Calibration in progress... {calibTimeLeft}s</strong>
+              <br />
+              Keep your hand steady in the center of the frame.
+            </p>
           </div>
         )}
 
@@ -1167,38 +1196,52 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           )}
         </div>
 
-        {showDebug && debugInfo && (
-          <div style={styles.debugPanel}>
-            <pre style={{ margin: 0, fontSize: "11px" }}>{debugInfo}</pre>
-          </div>
+        {statusMessage.visible && (
+          <div style={themeStyles.statusMessage}>{statusMessage.text}</div>
         )}
 
-        {statusMessage.visible && (
-          <div style={styles.statusMessage}>{statusMessage.text}</div>
+        {/* Debug UI */}
+        {showDebug && (
+          <div style={styles.debugPanel}>
+            FPS: {CONFIG.DRAW_FPS}
+            <br />
+            Points: {shapeRef.current?.length || 0}
+            <br />
+            Fallback: {usingMouseFallback ? "Yes" : "No"}
+          </div>
         )}
       </div>
-      <div style={styles.note}>
-        <strong style={styles.noteTitle}>How to play:</strong>•{" "}
-        <strong style={{ color: "#dc3545" }}>CLOSE HAND (fist)</strong> near
-        first point (red) to start tracing 🔴
-        <br />
-        • Keep closed, move to follow points in order (green when hit)
-        <br />• <strong style={{ color: "#28a745" }}>OPEN HAND</strong> after
-        last point to complete 🟢
-        <br />
-        • Orange line shows your trace path
-        <br />• Press <strong>'D'</strong> to show debug metrics
+
+      {/* Footer Info */}
+      <div style={themeStyles.note}>
+        <strong style={themeStyles.statValue}>Therapy Note:</strong> This
+        exercise focuses on fine motor control and spatial tracing. Try to
+        maintain a constant speed while following the green path.
       </div>
+      <SaveExitButton onBeforeSave={() => {
+        const playData = logsRef.current.map(log => ({
+          eventName: log.event,
+          score: log.score,
+          hand: log.hand,
+          responsetime: log.timestamp,
+          shapeType: log.shape_type
+        }));
+        gameSessionBuffer.update({
+          sessionScore: scoreRef.current,
+          playData,
+          coordinates: drawnPathRef.current.map(p => ({ x: p.x, y: p.y }))
+        });
+      }} />
     </div>
   );
 };
 
 // ==================== STYLES ====================
-const getStyles = (isDarkMode) => ({
+const styles = {
   container: {
     position: "relative",
     height: "100vh",
-    background: isDarkMode ? "#000" : "linear-gradient(#eaf7ea, #f6faf3)",
+    background: "linear-gradient(#eaf7ea, #f6faf3)",
     fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, Arial',
     overflow: "hidden",
   },
@@ -1212,11 +1255,8 @@ const getStyles = (isDarkMode) => ({
     justifyContent: "space-between",
     alignItems: "flex-start",
     padding: "12px",
-    background: isDarkMode ? "rgba(0, 0, 0, 0.4)" : "rgba(255, 255, 255, 0.8)",
-    backdropFilter: "blur(10px)",
-    borderBottom: isDarkMode
-      ? "1px solid rgba(255, 255, 255, 0.1)"
-      : "1px solid rgba(0, 0, 0, 0.1)",
+    background: "rgba(255, 255, 255, 0.)",
+    backdropFilter: "blur(1px)",
     gap: "12px",
   },
   topLeft: {
@@ -1229,13 +1269,12 @@ const getStyles = (isDarkMode) => ({
     minWidth: "300px",
   },
   title: {
-    color: isDarkMode ? "#4ade80" : "#2f7a2f",
+    color: "#2f7a2f",
     margin: "0 0 8px",
     fontSize: "22px",
-    fontWeight: "800",
   },
   muted: {
-    color: isDarkMode ? "#94a3b8" : "#575f56",
+    color: "#575f56",
     fontSize: "13px",
     margin: 0,
     lineHeight: 1.4,
@@ -1270,20 +1309,16 @@ const getStyles = (isDarkMode) => ({
   },
   calibOverlay: {
     position: "absolute",
-    left: "20px",
-    top: "20px",
-    padding: "16px 24px",
-    background: isDarkMode
-      ? "rgba(30, 41, 59, 0.95)"
-      : "rgba(255, 255, 255, 0.95)",
-    borderRadius: "16px",
+    left: "8px",
+    top: "8px",
+    padding: "10px 14px",
+    background: "rgba(255, 255, 255, 0.95)",
+    borderRadius: "6px",
     zIndex: 10,
-    fontSize: "14px",
-    fontWeight: "700",
-    color: isDarkMode ? "#f8fafc" : "#1e293b",
-    maxWidth: "320px",
-    boxShadow: "0 8px 32px rgba(0, 0, 0, 0.3)",
-    border: isDarkMode ? "1px solid rgba(255,255,255,0.1)" : "none",
+    fontSize: "13px",
+    fontWeight: 500,
+    maxWidth: "280px",
+    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",
   },
   calibText: {
     margin: 0,
@@ -1341,23 +1376,21 @@ const getStyles = (isDarkMode) => ({
     padding: "11px",
     borderRadius: "8px",
     border: 0,
-    background: isDarkMode ? "#10b981" : "#2f7a2f",
+    background: "#2f7a2f",
     color: "white",
     cursor: "pointer",
     fontSize: "14px",
-    fontWeight: 700,
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
+    fontWeight: 600,
     transition: "all 0.2s",
   },
   buttonDisabled: {
-    background: isDarkMode ? "#374151" : "#ccc",
+    background: "#ccc",
     cursor: "not-allowed",
     opacity: 0.6,
   },
   checkboxLabel: {
     fontSize: "13px",
-    color: isDarkMode ? "#94a3b8" : "#575f56",
+    color: "#575f56",
     marginTop: "6px",
     display: "flex",
     alignItems: "center",
@@ -1374,22 +1407,21 @@ const getStyles = (isDarkMode) => ({
   },
   statItem: {
     padding: "10px",
-    background: isDarkMode ? "#1e293b" : "#f9f9f9",
-    borderRadius: "8px",
-    border: isDarkMode ? "1px solid rgba(255,255,255,0.05)" : "1px solid #eee",
+    background: "#f9f9f9",
+    borderRadius: "6px",
+    border: "1px solid #eee",
   },
   statLabel: {
-    fontSize: "10px",
-    color: isDarkMode ? "#64748b" : "#575f56",
+    fontSize: "11px",
+    color: "#575f56",
     textTransform: "uppercase",
-    letterSpacing: "1px",
-    fontWeight: "800",
+    letterSpacing: "0.5px",
     marginBottom: "4px",
   },
   statValue: {
     fontSize: "20px",
-    fontWeight: 900,
-    color: isDarkMode ? "#10b981" : "#2f7a2f",
+    fontWeight: 700,
+    color: "#2f7a2f",
   },
   actions: {
     display: "flex",
@@ -1400,12 +1432,12 @@ const getStyles = (isDarkMode) => ({
     padding: "9px",
     borderRadius: "8px",
     border: 0,
-    background: isDarkMode ? "#334155" : "#e8e8e8",
-    color: isDarkMode ? "#f8fafc" : "#333",
+    background: "#e8e8e8",
+    color: "#333",
     cursor: "pointer",
     fontSize: "13px",
-    fontWeight: 600,
-    transition: "all 0.2s",
+    fontWeight: 500,
+    transition: "background 0.2s",
   },
   note: {
     position: "absolute",
@@ -1414,42 +1446,35 @@ const getStyles = (isDarkMode) => ({
     right: 0,
     zIndex: 20,
     fontSize: "12px",
-    color: isDarkMode ? "#94a3b8" : "#575f56",
-    padding: "14px",
-    background: isDarkMode ? "rgba(0, 0, 0, 0.6)" : "rgba(255, 255, 255, 0.4)",
-    backdropFilter: "blur(20px)",
-    borderTop: isDarkMode
-      ? "1px solid rgba(255, 255, 255, 0.1)"
-      : "1px solid rgba(0, 0, 0, 0.05)",
+    color: "#575f56",
+    padding: "12px",
+    background: "rgba(255, 255, 255, 0.09)",
+    backdropFilter: "blur(1px)",
+    borderTop: "1px solid rgba(255, 255, 255, 0.2)",
     lineHeight: 1.6,
-    borderLeft: `4px solid ${isDarkMode ? "#10b981" : "#2f7a2f"}`,
+    borderLeft: "3px solid #2f7a2f",
   },
   noteTitle: {
-    color: isDarkMode ? "#10b981" : "#2f7a2f",
+    color: "#2f7a2f",
     display: "block",
-    marginBottom: "4px",
-    fontWeight: "800",
-    textTransform: "uppercase",
+    marginBottom: "6px",
   },
   statusMessage: {
     position: "absolute",
     top: "50%",
     left: "50%",
     transform: "translate(-50%, -50%)",
-    background: isDarkMode
-      ? "rgba(15, 23, 42, 0.98)"
-      : "rgba(255, 255, 255, 0.95)",
-    padding: "16px 32px",
-    borderRadius: "16px",
-    fontSize: "18px",
-    fontWeight: 800,
-    color: isDarkMode ? "#10b981" : "#2f7a2f",
-    boxShadow: "0 20px 50px rgba(0, 0, 0, 0.4)",
-    zIndex: 100,
+    background: "rgba(255, 255, 255, 0.95)",
+    padding: "12px 24px",
+    borderRadius: "8px",
+    fontSize: "16px",
+    fontWeight: 600,
+    color: "#2f7a2f",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+    zIndex: 10,
     pointerEvents: "none",
-    border: `2px solid ${isDarkMode ? "#10b981" : "#2f7a2f"}`,
     animation: "slideDown 0.3s ease",
   },
-});
+};
 
-export default InCamGame;
+export default ShapeTracingGame;

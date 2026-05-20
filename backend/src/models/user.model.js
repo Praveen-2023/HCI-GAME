@@ -1,23 +1,7 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
-// Game-related schemas (unchanged)
-const playEntrySchema = new mongoose.Schema({
-  responsetime: { type: Number, required: true },
-  correct: { type: Number, enum: [-1, 0, 1], required: true }
-}, { _id: false });
-
-const gameSessionSchema = new mongoose.Schema({
-  time: { type: Date, default: Date.now, required: true },
-  levelspan: { type: Number, required: true },
-  play: [playEntrySchema]
-}, { _id: false });
-
-const gameTypeSchema = new mongoose.Schema({
-  type: { type: String, default: 'type1' },
-  name: { type: String, default: 'Reaction Game' },
-  eachGameStats: [gameSessionSchema]
-}, { _id: false });
+// Game tracking has been moved to GameSession model
 
 // Main User Schema
 const userSchema = new mongoose.Schema({
@@ -58,7 +42,7 @@ const userSchema = new mongoose.Schema({
   // For caretakers: a list of their assigned patients
   assignedPatients: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
 
-  game: [gameTypeSchema],
+  // Game sessions are now stored in the separate GameSession model
   level: { type: Number, default: 1 },
   totalScore: { type: Number, default: 0 },
   resetOTP: { type: String, default: null },

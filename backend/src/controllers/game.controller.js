@@ -1,4 +1,5 @@
 const User = require('../models/user.model');
+const GameSession = require('../models/gameSession.model');
 
 // Update level span (editable by doctor and caretaker)
 exports.updateLevelSpan = async (req, res) => {
@@ -81,14 +82,15 @@ exports.getLevelSpan = async (req, res) => {
 exports.saveGameSession = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { levelspan, playData } = req.body;
-
-    if (!playData || !Array.isArray(playData)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid play data'
-      });
-    }
+    const { 
+      gameType,
+      gameName,
+      levelspan, 
+      playData,
+      systemMetrics,
+      coordinates,
+      sessionScore: clientSessionScore
+    } = req.body;
 
     const user = await User.findById(userId);
     if (!user) {
@@ -98,34 +100,32 @@ exports.saveGameSession = async (req, res) => {
       });
     }
 
-    // Calculate score: correct = +10, incorrect = -5, not done = 0
-    let sessionScore = 0;
-    playData.forEach(entry => {
-      if (entry.correct === 1) sessionScore += 10;
-      else if (entry.correct === -1) sessionScore -= 5;
-    });
+    const type = gameType || 'type1';
+    const name = gameName || 'Reaction Game';
 
-    // Ensure sessionScore doesn't go negative
-    if (sessionScore < 0) sessionScore = 0;
+    // Calculate score: correct = +10, incorrect = -5 (For legacy Piano game)
+    let sessionScore = clientSessionScore || 0;
+    if (clientSessionScore === undefined && playData && type === 'type1') {
+      playData.forEach(entry => {
+        if (entry.correct === 1) sessionScore += 10;
+        else if (entry.correct === -1) sessionScore -= 5;
+      });
+      if (sessionScore < 0) sessionScore = 0;
+    }
 
-    const newSession = {
+    const newSession = new GameSession({
+      user: userId,
+      gameType: type,
+      gameName: name,
       time: new Date(),
       levelspan: levelspan,
-      play: playData
-    };
+      sessionScore: sessionScore,
+      systemMetrics: systemMetrics || undefined,
+      coordinates: coordinates || undefined,
+      play: playData || []
+    });
 
-    // Find or create game type
-    let gameType = user.game.find(g => g.type === 'type1');
-
-    if (!gameType) {
-      user.game.push({
-        type: 'type1',
-        name: 'Reaction Game',
-        eachGameStats: [newSession]
-      });
-    } else {
-      gameType.eachGameStats.push(newSession);
-    }
+    await newSession.save();
 
     user.totalScore += sessionScore;
     user.level = user.calculateLevel();
@@ -173,44 +173,73 @@ exports.getDetailedAnalytics = async (req, res) => {
       });
     }
 
-    // Get game stats
-    const gameType = user.game.find(g => g.type === 'type1');
-    const sessions = gameType ? gameType.eachGameStats : [];
+    const sessions = await GameSession.find({ user: userId }).sort({ time: 1 });
+    
+    // Group by game type
+    const grouped = sessions.reduce((acc, session) => {
+      if (!acc[session.gameType]) {
+        acc[session.gameType] = { type: session.gameType, name: session.gameName, eachGameStats: [] };
+      }
+      acc[session.gameType].eachGameStats.push(session);
+      return acc;
+    }, {});
+    
+    const games = Object.values(grouped);
 
-    // Calculate overall statistics
-    let totalCorrect = 0;
-    let totalIncorrect = 0;
-    let totalNotDone = 0;
-    let totalResponseTime = 0;
-    let validResponseCount = 0;
+    // Get game stats for all games
+    const gamesData = games.map(gameObj => {
+      const sessions = gameObj.eachGameStats || [];
+      let totalCorrect = 0;
+      let totalIncorrect = 0;
+      let totalNotDone = 0;
+      let totalResponseTime = 0;
+      let validResponseCount = 0;
+      let totalScore = 0;
 
-    sessions.forEach(session => {
-      session.play.forEach(entry => {
-        if (entry.correct === 1) {
-          totalCorrect++;
-          if (entry.responsetime !== -1) {
-            totalResponseTime += entry.responsetime;
-            validResponseCount++;
+      sessions.forEach(session => {
+        totalScore += session.sessionScore || 0;
+        session.play.forEach(entry => {
+          if (entry.correct === 1) {
+            totalCorrect++;
+            if (entry.responsetime !== -1 && entry.responsetime !== undefined) {
+              totalResponseTime += entry.responsetime;
+              validResponseCount++;
+            }
+          } else if (entry.correct === -1) {
+            totalIncorrect++;
+            if (entry.responsetime !== -1 && entry.responsetime !== undefined) {
+              totalResponseTime += entry.responsetime;
+              validResponseCount++;
+            }
+          } else if (entry.correct === 0) {
+            totalNotDone++;
           }
-        } else if (entry.correct === -1) {
-          totalIncorrect++;
-          if (entry.responsetime !== -1) {
-            totalResponseTime += entry.responsetime;
-            validResponseCount++;
-          }
-        } else if (entry.correct === 0) {
-          totalNotDone++;
-        }
+        });
       });
+
+      const avgResponseTime = validResponseCount > 0 
+        ? (totalResponseTime / validResponseCount).toFixed(2)
+        : 0;
+
+      const accuracy = (totalCorrect + totalIncorrect) > 0
+        ? ((totalCorrect / (totalCorrect + totalIncorrect)) * 100).toFixed(2)
+        : 0;
+
+      return {
+        type: gameObj.type,
+        name: gameObj.name,
+        overallStats: {
+          totalSessions: sessions.length,
+          totalScore,
+          totalCorrect,
+          totalIncorrect,
+          totalNotDone,
+          avgResponseTime: parseFloat(avgResponseTime),
+          accuracy: parseFloat(accuracy)
+        },
+        sessions: sessions.slice(-10) // Last 10 sessions
+      };
     });
-
-    const avgResponseTime = validResponseCount > 0 
-      ? (totalResponseTime / validResponseCount).toFixed(2)
-      : 0;
-
-    const accuracy = (totalCorrect + totalIncorrect) > 0
-      ? ((totalCorrect / (totalCorrect + totalIncorrect)) * 100).toFixed(2)
-      : 0;
 
     res.json({
       success: true,
@@ -222,15 +251,7 @@ exports.getDetailedAnalytics = async (req, res) => {
           level: user.level,
           currentlevelspan: user.currentlevelspan
         },
-        overallStats: {
-          totalSessions: sessions.length,
-          totalCorrect,
-          totalIncorrect,
-          totalNotDone,
-          avgResponseTime: parseFloat(avgResponseTime),
-          accuracy: parseFloat(accuracy)
-        },
-        sessions: sessions.slice(-10) // Last 10 sessions
+        games: gamesData
       }
     });
   } catch (error) {
@@ -257,24 +278,44 @@ exports.getBasicStats = async (req, res) => {
       });
     }
 
-    const gameType = user.game.find(g => g.type === 'type1');
-    const sessions = gameType ? gameType.eachGameStats.slice(-30) : [];
+    const sessions = await GameSession.find({ user: userId }).sort({ time: 1 });
+    
+    // Group by game type
+    const grouped = sessions.reduce((acc, session) => {
+      if (!acc[session.gameType]) {
+        acc[session.gameType] = { type: session.gameType, name: session.gameName, eachGameStats: [] };
+      }
+      acc[session.gameType].eachGameStats.push(session);
+      return acc;
+    }, {});
+    
+    const games = Object.values(grouped);
 
-    const basicSessions = sessions.map(session => {
+    const gamesData = games.map(gameObj => {
+      const sessions = gameObj.eachGameStats ? gameObj.eachGameStats.slice(-30) : [];
+      const basicSessions = sessions.map(session => {
+        const correct = session.play.filter(p => p.correct === 1).length;
+        const incorrect = session.play.filter(p => p.correct === -1).length;
+        const notDone = session.play.filter(p => p.correct === 0).length;
+        const responsetime = session.play.reduce((sum, p) => sum + (p.responsetime || 0), 0);
 
-      const correct = session.play.filter(p => p.correct === 1).length;
-      const incorrect = session.play.filter(p => p.correct === -1).length;
-      const notDone = session.play.filter(p => p.correct === 0).length;
-      const responsetime = session.play.reduce((sum, p) => sum + p.responsetime, 0);
+        return {
+          session: session,
+          time: session.time,
+          correct,
+          incorrect,
+          responsetime,
+          notDone,
+          total: session.play.length,
+          sessionScore: session.sessionScore,
+          systemMetrics: session.systemMetrics
+        };
+      });
 
       return {
-        session: session,
-        time: session.time,
-        correct,
-        incorrect,
-        responsetime,
-        notDone,
-        total: session.play.length,
+        type: gameObj.type,
+        name: gameObj.name,
+        recentSessions: basicSessions
       };
     });
 
@@ -286,8 +327,9 @@ exports.getBasicStats = async (req, res) => {
         totalScore: user.totalScore,
         level: user.level,
         currentlevelspan: user.currentlevelspan,
-        // responsetime,
-        recentSessions: basicSessions,
+        games: gamesData,
+        // Legacy support mapping type1 to root recentSessions just in case
+        recentSessions: gamesData.find(g => g.type === 'type1')?.recentSessions || []
       }
     });
   } catch (error) {
