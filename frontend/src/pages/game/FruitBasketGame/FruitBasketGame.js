@@ -44,6 +44,7 @@ const FruitBasketGame = () => {
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [calibTimeLeft, setCalibTimeLeft] = useState(0);
   const [isSessionActive, setIsSessionActive] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [usingMouseFallback] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [statusMessage, setStatusMessage] = useState({
@@ -106,6 +107,8 @@ const FruitBasketGame = () => {
   const handleTrialTimeoutRef = useRef(null);
   const mainLoopRef = useRef(null);
   const isProcessingRef = useRef(false);
+  const isPausedRef = useRef(false);
+  const pausedTimeRef = useRef(0); // ms elapsed at the moment of pause
 
   // Game State Refs
   const handStateRef = useRef({
@@ -606,6 +609,8 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
   // ==================== GAME LOGIC ====================
   const gameLogicTick = useCallback(() => {
+    // Don't tick game logic while paused
+    if (isPausedRef.current) return;
     if (!fruitRef.current || !sessionStartRef.current) return;
     
     // Throttled trial timer update (once per second)
@@ -1028,24 +1033,28 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     gridHolesRef.current.forEach((hole, idx) => {
       const px = hole.x * w;
       const py = hole.y * h;
-      const r = Math.max(35 * scale, CONFIG.PICK_DISTANCE * Math.min(w, h));
+      const isBasket = idx === basketIdxRef.current;
+      // Basket is drawn 2× larger so it is easy to see and aim for
+      const r = isBasket
+        ? Math.max(70 * scale, CONFIG.DROP_DISTANCE * Math.min(w, h))
+        : Math.max(35 * scale, CONFIG.PICK_DISTANCE * Math.min(w, h));
       ctx.beginPath();
       ctx.fillStyle =
-        idx === basketIdxRef.current
+        isBasket
           ? "rgba(180, 255, 180, 0.9)"
           : "rgba(255, 255, 255, 0.7)";
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = idx === basketIdxRef.current ? "#2f7a2f" : "#999";
-      ctx.lineWidth = 3 * scale;
+      ctx.strokeStyle = isBasket ? "#2f7a2f" : "#999";
+      ctx.lineWidth = isBasket ? 4 * scale : 3 * scale;
       ctx.stroke();
       ctx.fillStyle = "#000";
-      ctx.font = idx === basketIdxRef.current ? `${28 * scale}px Arial` : `${13 * scale}px Arial`;
+      ctx.font = isBasket ? `${36 * scale}px Arial` : `${13 * scale}px Arial`;
       ctx.textAlign = "center";
       ctx.fillText(
-        idx === basketIdxRef.current ? "🧺" : `${idx}`,
+        isBasket ? "🧺" : `${idx}`,
         px,
-        py + (idx === basketIdxRef.current ? 8 * scale : 5 * scale),
+        py + (isBasket ? 10 * scale : 5 * scale),
       );
     });
     if (fruitRef.current) {
@@ -1365,6 +1374,9 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     successesRef.current = 0;
     logsRef.current = [];
     sessionStartRef.current = Date.now();
+    pausedTimeRef.current = 0;
+    isPausedRef.current = false;
+    setIsPaused(false);
 
     setupGrid();
     spawnFruit();
@@ -1373,7 +1385,8 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     setIsSessionActive(true);
 
     timerIntervalRef.current = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 1000);
+      if (isPausedRef.current) return; // freeze timer while paused
+      const elapsed = Math.floor((Date.now() - sessionStartRef.current - pausedTimeRef.current) / 1000);
       const remaining = Math.max(0, CONFIG.SESSION_SECONDS - elapsed);
       setTimeRemaining(remaining);
 
@@ -1384,9 +1397,46 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     }, 1000);
 
     logsRef.current.push({ timestamp: 0, event: "session_start" });
-    // Init local session buffer
     gameSessionBuffer.init('fruit_basket', 'Arm – Fruit Fetch');
     showStatus("🎮 Session started! Close hand to grab fruit!", 3000);
+  };
+
+  const handlePauseResume = () => {
+    if (!isSessionActive) return;
+    if (!isPausedRef.current) {
+      // ── PAUSE ────────────────────────────────────────
+      isPausedRef.current = true;
+      setIsPaused(true);
+      // Record when we paused so we can subtract that dead time from elapsed
+      pausedTimeRef._pauseStartedAt = Date.now();
+      // Freeze the trial timeout too
+      if (trialTimeoutIdRef.current) {
+        clearTimeout(trialTimeoutIdRef.current);
+        trialTimeoutIdRef._remainingAtPause =
+          CONFIG.TRIAL_TIMEOUT_MS -
+          (Date.now() - trialStartTimeRef.current);
+      }
+      logsRef.current.push({ timestamp: nowSec(), event: "session_pause" });
+      showStatus("⏸️ Session paused", 2000);
+    } else {
+      // ── RESUME ──────────────────────────────────────
+      const pausedDuration = Date.now() - pausedTimeRef._pauseStartedAt;
+      pausedTimeRef.current += pausedDuration; // accumulate paused ms
+
+      // Re-schedule trial timeout for remaining time
+      const remaining = trialTimeoutIdRef._remainingAtPause;
+      if (remaining != null && remaining > 0) {
+        trialStartTimeRef.current = Date.now() - (CONFIG.TRIAL_TIMEOUT_MS - remaining);
+        trialTimeoutIdRef.current = setTimeout(() => {
+          if (handleTrialTimeoutRef.current) handleTrialTimeoutRef.current();
+        }, remaining);
+      }
+
+      isPausedRef.current = false;
+      setIsPaused(false);
+      logsRef.current.push({ timestamp: nowSec(), event: "session_resume" });
+      showStatus("▶️ Session resumed!", 2000);
+    }
   };
   const saveSessionDataToBuffer = useCallback(() => {
     const playData = logsRef.current
@@ -1739,9 +1789,20 @@ Calibration:
           >
             📏 Calibrate
           </button>
-          <button onClick={handleStartSession} style={styles.controlButton}>
-            {isSessionActive ? "Pause Session" : "Start Session"}
+          <button onClick={handleStartSession} style={styles.controlButton} disabled={isSessionActive}>
+            Start Session
           </button>
+          {isSessionActive && (
+            <button
+              onClick={handlePauseResume}
+              style={{
+                ...styles.controlButton,
+                background: isPaused ? "#2f7a2f" : "#e6a817",
+              }}
+            >
+              {isPaused ? "▶️ Resume" : "⏸️ Pause"}
+            </button>
+          )}
           
           <label style={styles.checkboxLabel}>
             <input
