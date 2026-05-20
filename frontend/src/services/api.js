@@ -1,8 +1,8 @@
 import axios from "axios";
+import { API_BASE_URL } from "../constants";
 
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || "https://hci-proj.vercel.app/api",
-  // 'http://localhost:5001/api',
+  baseURL: API_BASE_URL,
   headers: { "Content-Type": "application/json" },
 });
 

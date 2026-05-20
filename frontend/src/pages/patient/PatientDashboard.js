@@ -495,9 +495,9 @@ const DashboardContent = ({
   const avgAcc7Sessions =
     last7ChronAsc.length > 0
       ? last7ChronAsc.reduce((sum, s) => {
-          const total = (s.correct || 0) + (s.incorrect || 0);
-          return sum + (total > 0 ? ((s.correct || 0) / total) * 100 : 0);
-        }, 0) / last7ChronAsc.length
+        const total = (s.correct || 0) + (s.incorrect || 0);
+        return sum + (total > 0 ? ((s.correct || 0) / total) * 100 : 0);
+      }, 0) / last7ChronAsc.length
       : 0;
 
   // Average response time over last 7 games
@@ -506,8 +506,8 @@ const DashboardContent = ({
       const total =
         session.total ||
         (session.correct || 0) +
-          (session.incorrect || 0) +
-          (session.notDone || 0);
+        (session.incorrect || 0) +
+        (session.notDone || 0);
       const avg = total > 0 ? (session.responsetime || 0) / total : 2.5;
       return sum + avg;
     }, 0) / last7ChronAsc.length;
@@ -567,10 +567,10 @@ const DashboardContent = ({
   const selectedSessionData = last7ChronDesc[selectedSession];
   const attemptData = selectedSessionData?.session.play
     ? selectedSessionData.session.play.map((p, i) => ({
-        attempt: i + 1,
-        responseTime: p.responsetime,
-        correct: p.correct,
-      }))
+      attempt: i + 1,
+      responseTime: p.responsetime,
+      correct: p.correct,
+    }))
     : [];
 
   // Custom dot renderer for colored nodes based on correctness
@@ -1303,7 +1303,7 @@ const DashboardContent = ({
                       Start playing to see your progress and statistics
                     </p>
                     <button
-                      onClick={() => navigate("/game")}
+                      onClick={() => navigate("/piano-reaction")}
                       className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-primary-500 to-secondary-500 text-white rounded-lg hover:from-primary-600 hover:to-secondary-600 transition shadow-lg font-semibold text-lg"
                     >
                       <Play className="w-6 h-6" />
@@ -1376,27 +1376,27 @@ const DashboardContent = ({
           </div>
 
           <button
-            onClick={() => navigate("/game3")}
+            onClick={() => navigate("/board-drawing")}
             className="w-full flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-2xl font-bold text-lg hover:shadow-xl hover:shadow-primary-200 dark:hover:shadow-none transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-            // className="w-full flex items-center justify-center gap-3 p-4 bg-white dark:bg-gray-900 border-2 border-primary-50 dark:border-gray-800 text-gray-700 dark:text-gray-200 rounded-2xl font-bold text-lg hover:border-primary-100 dark:hover:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
+          // className="w-full flex items-center justify-center gap-3 p-4 bg-white dark:bg-gray-900 border-2 border-primary-50 dark:border-gray-800 text-gray-700 dark:text-gray-200 rounded-2xl font-bold text-lg hover:border-primary-100 dark:hover:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
           >
             <Play className="w-5 h-5 fill-current" />
-            Shape Tracing
+            Board Drawing
           </button>
 
           <button
-            onClick={() => navigate("/game4")}
+            onClick={() => navigate("/fruit-basket")}
             className="w-full flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-2xl font-bold text-lg hover:shadow-xl hover:shadow-primary-200 dark:hover:shadow-none transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-            // className="w-full flex items-center justify-center gap-3 p-4 bg-white dark:bg-gray-900 border-2 border-primary-50 dark:border-gray-800 text-gray-700 dark:text-gray-200 rounded-2xl font-bold text-lg hover:border-primary-100 dark:hover:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
+          // className="w-full flex items-center justify-center gap-3 p-4 bg-white dark:bg-gray-900 border-2 border-primary-50 dark:border-gray-800 text-gray-700 dark:text-gray-200 rounded-2xl font-bold text-lg hover:border-primary-100 dark:hover:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
           >
             <Play className="w-5 h-5 fill-current" />
             Arm – Fruit Fetch
           </button>
 
           <button
-            onClick={() => navigate("/game")}
+            onClick={() => navigate("/piano-reaction")}
             className="w-full flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-2xl font-bold text-lg hover:shadow-xl hover:shadow-primary-200 dark:hover:shadow-none transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-            // className="w-full flex items-center justify-center gap-3 p-4 bg-white dark:bg-gray-900 border-2 border-primary-50 dark:border-gray-800 text-gray-700 dark:text-gray-200 rounded-2xl font-bold text-lg hover:border-primary-100 dark:hover:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
+          // className="w-full flex items-center justify-center gap-3 p-4 bg-white dark:bg-gray-900 border-2 border-primary-50 dark:border-gray-800 text-gray-700 dark:text-gray-200 rounded-2xl font-bold text-lg hover:border-primary-100 dark:hover:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
           >
             <Play className="w-5 h-5 fill-current" />
             Piano Reaction Game

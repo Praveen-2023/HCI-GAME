@@ -446,7 +446,7 @@ const PlayingGame = ({
 };
 
 // --- Main Game Page Component ---
-const GamePage = () => {
+const PianoReactionGame = () => {
   const { user, isDarkMode } = useAuth();
   const navigate = useNavigate();
 
@@ -1180,4 +1180,4 @@ const GamePage = () => {
   );
 };
 
-export default GamePage;
+export default PianoReactionGame;

@@ -10,32 +10,21 @@ const CONFIG = {
   CALIBRATION_SECONDS: 7,
   NUM_SHAPE_POINTS: 20,
   PICK_DISTANCE: 0.08,
-  TRACE_TOLERANCE: 0.05,
+  TRACE_TOLERANCE: 0.03,
   SCORE_PER_SHAPE: 10,
   MIN_COMPLETION: 0.8, // 80% points hit for success
-  SMOOTH_ALPHA: 0.7,
-  STABLE_FRAMES: 2,
+  SMOOTH_ALPHA: 0.5,
+  STABLE_FRAMES: 5,
   DRAW_FPS: 30,
 };
 
 // ==================== SHAPE GENERATION ====================
-const SHAPES = [
-  "circle",
-  "ellipse",
-  "triangle",
-  "square",
-  "hexagon",
-  "star",
-  "heart",
-  "diamond",
-];
-
-const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
+const SHAPES = ["circle", "triangle", "square", "hexagon"];
 
 const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
   const centerX = 0.5;
   const centerY = 0.5;
-  let radius = 0.35;
+  let radius = 0.3;
   const points = [];
   const angleStep = (2 * Math.PI) / numPoints;
   for (let i = 0; i < numPoints; i++) {
@@ -57,7 +46,7 @@ const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
         break;
       case "square":
         const t = i / numPoints;
-        const sideFrac = 0.25;
+        const sideFrac = 0.35;
         let frac = t;
         let px, py;
         if (frac < sideFrac) {
@@ -77,73 +66,29 @@ const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
         y = centerY + radius * py;
         break;
       case "hexagon":
-        theta += Math.PI / 6; // Flat top
+        theta += Math.PI / 3; // Flat top
         x = centerX + radius * Math.cos(theta);
         y = centerY + radius * Math.sin(theta);
-        break;
-      case "star":
-        const rInner = radius * 0.4;
-        const rOuter = radius;
-        const r = i % 2 === 0 ? rOuter : rInner;
-        x = centerX + r * Math.cos(theta - Math.PI / 2);
-        y = centerY + r * Math.sin(theta - Math.PI / 2);
-        break;
-      case "heart":
-        const t_h = (i / numPoints) * 2 * Math.PI;
-        // parametric heart: x = 16 sin^3(t), y = 13 cos(t) - 5 cos(2t) - 2 cos(3t) - cos(4t)
-        const hx = 16 * Math.pow(Math.sin(t_h), 3);
-        const hy = -(
-          13 * Math.cos(t_h) -
-          5 * Math.cos(2 * t_h) -
-          2 * Math.cos(3 * t_h) -
-          Math.cos(4 * t_h)
-        );
-        x = centerX + (hx / 16) * radius;
-        y = centerY + (hy / 16) * radius + 0.05; // Slightly offset up
-        break;
-      case "diamond":
-        const td = i / numPoints;
-        if (td < 0.25) {
-          // Top to Right
-          x = centerX + (td / 0.25) * radius;
-          y = centerY - (1 - td / 0.25) * radius;
-        } else if (td < 0.5) {
-          // Right to Bottom
-          x = centerX + (1 - (td - 0.25) / 0.25) * radius;
-          y = centerY + ((td - 0.25) / 0.25) * radius;
-        } else if (td < 0.75) {
-          // Bottom to Left
-          x = centerX - ((td - 0.5) / 0.25) * radius;
-          y = centerY + (1 - (td - 0.5) / 0.25) * radius;
-        } else {
-          // Left to Top
-          x = centerX - (1 - (td - 0.75) / 0.25) * radius;
-          y = centerY - ((td - 0.75) / 0.25) * radius;
-        }
         break;
       default:
         x = centerX + radius * Math.cos(theta);
         y = centerY + radius * Math.sin(theta);
     }
-    // Final Clamp to ensure boundaries
-    points.push({
-      x: clamp(x, 0.05, 0.95),
-      y: clamp(y, 0.05, 0.95),
-    });
+    points.push({ x, y });
   }
   return points;
 };
 
 // ==================== MAIN COMPONENT ====================
-const DrawingGame = () => {
-  const { isDarkMode } = useAuth();
+const ShapeTracingGame = () => {
+  const { user, isDarkMode } = useAuth();
   // State Management
   const [isInitialized, setIsInitialized] = useState(false);
   const [calibrationDone, setCalibrationDone] = useState(false);
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [calibTimeLeft, setCalibTimeLeft] = useState(0);
   const [isSessionActive, setIsSessionActive] = useState(false);
-  const [usingMouseFallback] = useState(false);
+  const [usingMouseFallback, setUsingMouseFallback] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [statusMessage, setStatusMessage] = useState({
     text: "",
@@ -161,13 +106,11 @@ const DrawingGame = () => {
   const [rightHandVisible, setRightHandVisible] = useState(false);
   const [leftHandClosed, setLeftHandClosed] = useState(false);
   const [rightHandClosed, setRightHandClosed] = useState(false);
-  // eslint-disable-next-line no-unused-vars
   const [debugInfo, setDebugInfo] = useState("");
 
   // Refs
   const videoRef = useRef(null);
   const overlayRef = useRef(null);
-  const gameCanvasRef = useRef(null);
   const handsModuleRef = useRef(null);
   const poseModuleRef = useRef(null);
   const cameraRef = useRef(null);
@@ -219,7 +162,6 @@ const DrawingGame = () => {
     centerX: 0.5,
     centerY: 0.5,
     maxReachNorm: 0.2,
-    level: 1,
   });
 
   const shapeRef = useRef(null);
@@ -255,45 +197,26 @@ const DrawingGame = () => {
   };
 
   // ==================== SPAWN SHAPE ====================
-  const pickNewShape = useCallback(() => {
-    // Determine shape by level
-    const level = calibrationRef.current.level || 1;
-    let shapeType;
-    if (level <= SHAPES.length) {
-      shapeType = SHAPES[level - 1];
-    } else {
-      shapeType = SHAPES[Math.floor(Math.random() * SHAPES.length)];
-    }
-
-    const points = generateShapePoints(shapeType);
+  const spawnShape = useCallback(() => {
+    const type = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+    const points = generateShapePoints(type);
     shapeRef.current = {
-      type: shapeType,
+      type,
       points,
       drawingHand: null,
       startTime: Date.now(),
     };
     currentTargetIdxRef.current = 0;
     drawnPathRef.current = [];
-    setStatusMessage({
-      text: `Level ${level}: Trace the ${shapeType.toUpperCase()}`,
-      visible: true,
-    });
-    setTimeout(
-      () => setStatusMessage((prev) => ({ ...prev, visible: false })),
-      2000,
-    );
-  }, []);
 
-  const spawnShape = useCallback(() => {
-    pickNewShape();
     logsRef.current.push({
       timestamp: nowSec(),
       event: "spawn_shape",
-      shape_type: shapeRef.current.type,
-      num_points: shapeRef.current.points.length,
+      shape_type: type,
+      num_points: points.length,
       score: scoreRef.current,
     });
-  }, [pickNewShape]);
+  }, []);
 
   // ==================== MEDIAPIPE HANDLERS ====================
   const onHandsResults = useCallback((results) => {
@@ -312,7 +235,7 @@ const DrawingGame = () => {
           x: (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5,
           y: (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 5,
         };
-        const rawPos = { x: palmCenter.x, y: palmCenter.y };
+        const rawPos = { x: lm[8].x, y: lm[8].y };
         handState[label].pos = rawPos;
         handState[label].smoothPos = smoothPos(
           handState[label].smoothPos,
@@ -329,7 +252,7 @@ const DrawingGame = () => {
         ];
         let curledFingers = 0;
         fingerPairs.forEach(([tipIdx, midIdx]) => {
-          if (lm[tipIdx].y > lm[midIdx].y + 0.03) curledFingers++;
+          if (lm[tipIdx].y > lm[midIdx].y + 0.02) curledFingers++;
         });
 
         const thumbTipPoint = lm[4];
@@ -342,11 +265,11 @@ const DrawingGame = () => {
         const handSize =
           Math.hypot(middleBase.x - wrist.x, middleBase.y - wrist.y) || 0.05;
         const normalizedThumbDist = thumbToPalm / handSize;
-        const thumbClosed = normalizedThumbDist < 0.7;
+        const thumbClosed = normalizedThumbDist < 0.6;
 
         const fingerSpread = Math.hypot(lm[8].x - lm[20].x, lm[8].y - lm[20].y);
         const normalizedSpread = fingerSpread / handSize;
-        const tightSpread = normalizedSpread < 0.8;
+        const tightSpread = normalizedSpread < 0.7;
 
         const allTips = [4, 8, 12, 16, 20].map((idx) => lm[idx]);
         let avgDistToPalm = 0;
@@ -358,7 +281,7 @@ const DrawingGame = () => {
         });
         avgDistToPalm /= allTips.length;
         const normalizedCompactness = avgDistToPalm / handSize;
-        const veryCompact = normalizedCompactness < 0.9;
+        const veryCompact = normalizedCompactness < 0.8;
 
         const isClosed =
           curledFingers === 4 ||
@@ -479,6 +402,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       poseModuleRef.current.onResults(onPoseResults);
       cameraRef.current = new Camera(videoRef.current, {
         onFrame: async () => {
+          if (!videoRef.current) return;
           if (!usingMouseFallbackRef.current && isInitializedRef.current) {
             await handsModuleRef.current.send({ image: videoRef.current });
             await poseModuleRef.current.send({ image: videoRef.current });
@@ -536,7 +460,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           while (
             currentTargetIdxRef.current < shape.points.length &&
             distNorm(pos, shape.points[currentTargetIdxRef.current]) <
-              CONFIG.TRACE_TOLERANCE
+            CONFIG.TRACE_TOLERANCE
           ) {
             currentTargetIdxRef.current++;
           }
@@ -562,21 +486,11 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             completion,
           });
           if (completion >= CONFIG.MIN_COMPLETION) {
-            // Shape Success!
-            const newReps = reps + 1;
-            setReps(newReps);
             const newScore = scoreRef.current + CONFIG.SCORE_PER_SHAPE;
             setScore(newScore);
             scoreRef.current = newScore;
+            setReps((prev) => prev + 1);
             successesRef.current++;
-
-            // Advance level every 3 shapes
-            if (newReps % 3 === 0) {
-              calibrationRef.current.level =
-                (calibrationRef.current.level || 1) + 1;
-            }
-
-            pickNewShape();
             attemptsRef.current++;
             logsRef.current.push({
               timestamp: nowSec(),
@@ -623,7 +537,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         }
       }
     });
-  }, [spawnShape, pickNewShape, reps]);
+  }, [spawnShape]);
 
   // ==================== DRAWING ====================
   const drawOverlay = useCallback(() => {
@@ -634,6 +548,9 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const w = canvas.width;
     const h = canvas.height;
+    const scale = window.devicePixelRatio || 1;
+
+    // Draw pose points
     if (lastPoseResultsRef.current?.poseLandmarks) {
       const pl = lastPoseResultsRef.current.poseLandmarks;
       [
@@ -643,14 +560,16 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         [14, "R-El"],
       ].forEach(([idx]) => {
         if (!pl[idx] || pl[idx].visibility < 0.5) return;
-        const x = pl[idx].x * w;
-        const y = pl[idx].y * h;
+        const x = 10;
+        const y = 2;
         ctx.beginPath();
-        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.arc(x, y, 2, 0, Math.PI * 1);
         ctx.fillStyle = "rgba(255, 200, 0, 0.8)";
         ctx.fill();
       });
     }
+
+    // Draw hands
     const handState = handStateRef.current;
     ["Left", "Right"].forEach((label) => {
       const hand = handState[label];
@@ -748,19 +667,37 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
       ctx.fillStyle = hand.closed ? "#ff6b6b" : "#51cf66";
       ctx.font = "bold 14px Arial";
+      ctx.fillText(`Shape: ${shapeRef.current.type}`, 10, 30);
       ctx.fillText(`${label} ${stateText}`, pcx + 26, pcy);
+
+      // Draw hand cursor using smoothPos (index tip)
+      if (hand.smoothPos) {
+        const px = hand.smoothPos.x * w;
+        const py = hand.smoothPos.y * h;
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
+        ctx.arc(px + 2, py + 2, 14 * scale, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.fillStyle = hand.closed
+          ? "rgba(220, 50, 50, 0.95)"
+          : "rgba(50, 200, 80, 0.95)";
+        ctx.arc(px, py, 14 * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 3 * scale;
+        ctx.stroke();
+
+        ctx.fillStyle = "#fff";
+        ctx.font = `bold ${12 * scale}px Arial`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label[0], px, py);
+      }
     });
-  }, []);
 
-  const drawGame = useCallback(() => {
-    const canvas = gameCanvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const w = canvas.width;
-    const h = canvas.height;
-    const scale = window.devicePixelRatio || 1;
+    // Draw game elements (shape, points, path)
     if (shapeRef.current) {
       const shape = shapeRef.current;
       // Draw shape outline
@@ -811,34 +748,6 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         ctx.stroke();
       }
     }
-    const handState = handStateRef.current;
-    ["Left", "Right"].forEach((label) => {
-      const hand = handState[label];
-      if (!hand.smoothPos || !hand.visible) return;
-      const px = hand.smoothPos.x * w;
-      const py = hand.smoothPos.y * h;
-
-      ctx.beginPath();
-      ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
-      ctx.arc(px + 2, py + 2, 14 * scale, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.fillStyle = hand.closed
-        ? "rgba(220, 50, 50, 0.95)"
-        : "rgba(50, 200, 80, 0.95)";
-      ctx.arc(px, py, 14 * scale, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 3 * scale;
-      ctx.stroke();
-
-      ctx.fillStyle = "#fff";
-      ctx.font = `bold ${12 * scale}px Arial`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(label[0], px, py);
-    });
   }, []);
 
   const syncCanvasSizes = useCallback(() => {
@@ -846,21 +755,6 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       if (overlayRef.current.width !== videoRef.current.videoWidth) {
         overlayRef.current.width = videoRef.current.videoWidth || 640;
         overlayRef.current.height = videoRef.current.videoHeight || 480;
-      }
-    }
-
-    if (gameCanvasRef.current) {
-      const targetW =
-        gameCanvasRef.current.clientWidth * (window.devicePixelRatio || 1);
-      const targetH =
-        gameCanvasRef.current.clientHeight * (window.devicePixelRatio || 1);
-
-      if (
-        gameCanvasRef.current.width !== targetW ||
-        gameCanvasRef.current.height !== targetH
-      ) {
-        gameCanvasRef.current.width = targetW;
-        gameCanvasRef.current.height = targetH;
       }
     }
   }, []);
@@ -873,13 +767,12 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     if (now - lastDrawTimeRef.current >= drawInterval) {
       syncCanvasSizes();
       drawOverlay();
-      drawGame();
       lastDrawTimeRef.current = now;
     }
 
     gameLogicTick();
     requestAnimationFrame(mainLoop);
-  }, [syncCanvasSizes, drawOverlay, drawGame, gameLogicTick]);
+  }, [syncCanvasSizes, drawOverlay, gameLogicTick]);
 
   // ==================== EVENT HANDLERS ====================
   const handleStartCalibration = () => {
@@ -995,14 +888,91 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     );
   };
 
+  const handleDownloadCSV = () => {
+    const headers = [
+      "timestamp_sec",
+      "event",
+      "shape_type",
+      "hand",
+      "hits",
+      "total",
+      "completion",
+      "score",
+    ];
+    const rows = [headers.join(",")];
+
+    logsRef.current.forEach((log) => {
+      const row = [
+        log.timestamp ?? "",
+        log.event ?? "",
+        log.shape_type ?? "",
+        log.hand ?? "",
+        log.hits ?? "",
+        log.total ?? "",
+        log.completion ?? "",
+        log.score ?? "",
+      ];
+      rows.push(row.join(","));
+    });
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `shape-drawing-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleReset = () => {
     window.location.reload();
   };
 
+  const handleMouseFallbackChange = (e) => {
+    const checked = e.target.checked;
+    setUsingMouseFallback(checked);
+    usingMouseFallbackRef.current = checked;
+    if (checked) {
+      alert(
+        "Mouse fallback enabled. Click/drag on video to control right hand.",
+      );
+      handStateRef.current.Right.visible = true;
+      setRightHandVisible(true);
+    } else {
+      handStateRef.current.Right.visible = false;
+      setRightHandVisible(false);
+    }
+  };
 
+  const handleOverlayMouseMove = (e) => {
+    if (!usingMouseFallbackRef.current) return;
+    const rect = overlayRef.current.getBoundingClientRect();
+    const pos = {
+      x: (e.clientX - rect.left) / rect.width,
+      y: (e.clientY - rect.top) / rect.height,
+    };
+    handStateRef.current.Right.smoothPos = smoothPos(
+      handStateRef.current.Right.smoothPos,
+      pos,
+    );
+    handStateRef.current.Right.visible = true;
+    setRightHandVisible(true);
+  };
 
+  const handleOverlayMouseDown = () => {
+    if (!usingMouseFallbackRef.current) return;
+    handStateRef.current.Right.closedFrames = CONFIG.STABLE_FRAMES;
+    handStateRef.current.Right.openFrames = 0;
+    handStateRef.current.Right.closed = true;
+    setRightHandClosed(true);
+  };
 
-
+  const handleOverlayMouseUp = () => {
+    if (!usingMouseFallbackRef.current) return;
+    handStateRef.current.Right.openFrames = CONFIG.STABLE_FRAMES;
+    handStateRef.current.Right.closedFrames = 0;
+    handStateRef.current.Right.closed = false;
+    setRightHandClosed(false);
+  };
 
   // ==================== EFFECTS ====================
   useEffect(() => {
@@ -1038,26 +1008,26 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
       if (cameraRef.current) cameraRef.current.stop();
+      if (handsModuleRef.current) handsModuleRef.current.close();
+      if (poseModuleRef.current) poseModuleRef.current.close();
     };
   }, [setupMediaPipe, mainLoop]);
 
   // ==================== RENDER ====================
-  // ==================== RENDER ====================
+  // --- DYNAMIC STYLES ---
   const themeStyles = {
     container: {
       ...styles.container,
       background: isDarkMode ? "#000" : "#F4F7FE",
-      color: isDarkMode ? "#fff" : "#333",
     },
-    panel: {
-      ...styles.panel,
+    topPanel: {
+      ...styles.topPanel,
       background: isDarkMode
-        ? "rgba(17, 24, 39, 0.95)"
-        : "rgba(255, 255, 255, 0.95)",
-      borderRight: isDarkMode
+        ? "rgba(0, 0, 0, 0.4)"
+        : "rgba(255, 255, 255, 0.8)",
+      borderBottom: isDarkMode
         ? "1px solid rgba(255, 255, 255, 0.1)"
         : "1px solid rgba(0, 0, 0, 0.1)",
-      backdropFilter: "blur(20px)",
     },
     title: {
       ...styles.title,
@@ -1067,10 +1037,13 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       ...styles.muted,
       color: isDarkMode ? "#94a3b8" : "#575f56",
     },
-    videoWrap: {
-      ...styles.videoWrap,
-      borderColor: isDarkMode ? "#1f2937" : "#eee",
-      background: "#000",
+    calibOverlay: {
+      ...styles.calibOverlay,
+      background: isDarkMode
+        ? "rgba(31, 41, 55, 0.95)"
+        : "rgba(255, 255, 255, 0.95)",
+      color: isDarkMode ? "#fff" : "#000",
+      border: isDarkMode ? "1px solid rgba(255, 255, 255, 0.1)" : "none",
     },
     statItem: {
       ...styles.statItem,
@@ -1088,12 +1061,12 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     note: {
       ...styles.note,
       background: isDarkMode
-        ? "rgba(0, 0, 0, 0.3)"
-        : "rgba(255, 255, 255, 0.5)",
+        ? "rgba(0, 0, 0, 0.6)"
+        : "rgba(255, 255, 255, 0.1)",
       color: isDarkMode ? "#94a3b8" : "#575f56",
       borderTop: isDarkMode
         ? "1px solid rgba(255, 255, 255, 0.1)"
-        : "1px solid rgba(0, 0, 0, 0.05)",
+        : "1px solid rgba(0, 0, 0, 0.2)",
     },
     statusMessage: {
       ...styles.statusMessage,
@@ -1103,116 +1076,125 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       color: isDarkMode ? "#4ade80" : "#2f7a2f",
       border: isDarkMode ? "1px solid #4ade80" : "none",
     },
-    actionButton: {
-      ...styles.actionButton,
-      background: isDarkMode ? "#374151" : "#e8e8e8",
-      color: isDarkMode ? "#fff" : "#333",
-    },
   };
 
   return (
     <div style={themeStyles.container}>
-      <aside style={themeStyles.panel}>
-        <h1 style={themeStyles.title}>Trace & Master</h1>
-        <p style={themeStyles.muted}>
-          A surgical-grade motor rehabilitation module. Follow the patterns with
-          high precision.
-        </p>
+      {/* Top UI */}
+      <div style={themeStyles.topPanel}>
+        <div style={styles.topLeft}>
+          <h1 style={themeStyles.title}>Precision Drawing</h1>
+          <p style={themeStyles.muted}>
+            Trace the anatomical patterns with your pointer finger.
+          </p>
+        </div>
+        <div style={styles.topRight}>
+          <div style={themeStyles.stats}>
+            <div style={themeStyles.statItem}>
+              <div style={themeStyles.statLabel}>Success Rate</div>
+              <div style={themeStyles.statValue}>
+                {Math.round(successRate)}%
+              </div>
+            </div>
+            <div style={themeStyles.statItem}>
+              <div style={themeStyles.statLabel}>Shapes Done</div>
+              <div style={themeStyles.statValue}>{reps}</div>
+            </div>
+            <div style={themeStyles.statItem}>
+              <div style={themeStyles.statLabel}>Timer</div>
+              <div style={themeStyles.statValue}>
+                {formatTime(timeRemaining)}
+              </div>
+            </div>
+          </div>
+          <div style={styles.actions}>
+            <button
+              onClick={handleStartCalibration}
+              style={styles.controlButton}
+              disabled={isCalibrating}
+            >
+              📏 Calibrate
+            </button>
+            <button
+              onClick={() => setIsSessionActive(!isSessionActive)}
+              style={styles.controlButton}
+            >
+              {isSessionActive ? "Pause Session" : "Start Session"}
+            </button>
+            <button
+              onClick={() => {
+                window.history.back();
+              }}
+              style={styles.actionButton}
+            >
+              Quit
+            </button>
+          </div>
+        </div>
+      </div>
 
-        <div style={themeStyles.videoWrap}>
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            style={styles.video}
-          />
-          <canvas ref={overlayRef} style={styles.overlay} />
+      {/* Main Video/Game Panel */}
+      <div style={styles.videoWrap}>
+        <video ref={videoRef} style={styles.video} playsInline muted />
+        <canvas ref={overlayRef} style={styles.overlay} />
 
-          {isCalibrating && (
-            <div style={themeStyles.statusMessage}>
-              Calibrating... {calibTimeLeft}s
+        {isCalibrating && (
+          <div style={themeStyles.calibOverlay}>
+            <p style={themeStyles.calibText}>
+              <strong>Calibration in progress... {calibTimeLeft}s</strong>
+              <br />
+              Keep your hand steady in the center of the frame.
+            </p>
+          </div>
+        )}
+
+        <div style={styles.handStatus}>
+          {leftHandVisible && (
+            <div
+              style={{
+                ...styles.handIndicator,
+                ...(leftHandClosed ? styles.handClosed : styles.handOpen),
+              }}
+            >
+              <span style={styles.dot}></span>
+              <span>Left - {leftHandClosed ? "CLOSED 🔴" : "OPEN 🟢"}</span>
             </div>
           )}
-
-          <div style={styles.handStatus}>
-            {leftHandVisible && (
-              <div
-                style={{
-                  ...styles.handIndicator,
-                  ...(leftHandClosed ? styles.handClosed : styles.handOpen),
-                }}
-              >
-                <span style={styles.dot}></span>
-                <span>Left {leftHandClosed ? "🔴" : "🟢"}</span>
-              </div>
-            )}
-            {rightHandVisible && (
-              <div
-                style={{
-                  ...styles.handIndicator,
-                  ...(rightHandClosed ? styles.handClosed : styles.handOpen),
-                }}
-              >
-                <span style={styles.dot}></span>
-                <span>Right {rightHandClosed ? "🔴" : "🟢"}</span>
-              </div>
-            )}
-          </div>
+          {rightHandVisible && (
+            <div
+              style={{
+                ...styles.handIndicator,
+                ...(rightHandClosed ? styles.handClosed : styles.handOpen),
+              }}
+            >
+              <span style={styles.dot}></span>
+              <span>Right - {rightHandClosed ? "CLOSED 🔴" : "OPEN 🟢"}</span>
+            </div>
+          )}
         </div>
 
-        <div style={styles.controls}>
-          <button
-            onClick={handleStartCalibration}
-            style={styles.controlButton}
-            disabled={isCalibrating}
-          >
-            📏 Calibrate System
-          </button>
-          <button onClick={handleStartSession} style={styles.controlButton}>
-            {isSessionActive ? "⏸ Pause" : "▶️ Start Therapy"}
-          </button>
-        </div>
-
-        <div style={themeStyles.stats}>
-          <div style={themeStyles.statItem}>
-            <div style={themeStyles.statLabel}>Total Score</div>
-            <div style={themeStyles.statValue}>{score}</div>
-          </div>
-          <div style={themeStyles.statItem}>
-            <div style={themeStyles.statLabel}>Success Rate</div>
-            <div style={themeStyles.statValue}>{Math.round(successRate)}%</div>
-          </div>
-          <div style={themeStyles.statItem}>
-            <div style={themeStyles.statLabel}>Session Timer</div>
-            <div style={themeStyles.statValue}>{formatTime(timeRemaining)}</div>
-          </div>
-        </div>
-
-        <div style={styles.actions}>
-          <button
-            onClick={() => window.history.back()}
-            style={themeStyles.actionButton}
-          >
-            Quit Session
-          </button>
-          <button onClick={handleReset} style={themeStyles.actionButton}>
-            Reset
-          </button>
-        </div>
-
-        <div style={themeStyles.note}>
-          <strong style={themeStyles.statValue}>Clinical Focus:</strong> Fine
-          motor precision and distal control.
-        </div>
-      </aside>
-
-      <main style={styles.gameArea}>
-        <canvas ref={gameCanvasRef} style={styles.gameCanvas} />
         {statusMessage.visible && (
           <div style={themeStyles.statusMessage}>{statusMessage.text}</div>
         )}
-      </main>
+
+        {/* Debug UI */}
+        {showDebug && (
+          <div style={styles.debugPanel}>
+            FPS: {CONFIG.DRAW_FPS}
+            <br />
+            Points: {shapeRef.current?.length || 0}
+            <br />
+            Fallback: {usingMouseFallback ? "Yes" : "No"}
+          </div>
+        )}
+      </div>
+
+      {/* Footer Info */}
+      <div style={themeStyles.note}>
+        <strong style={themeStyles.statValue}>Therapy Note:</strong> This
+        exercise focuses on fine motor control and spatial tracing. Try to
+        maintain a constant speed while following the green path.
+      </div>
     </div>
   );
 };
@@ -1220,21 +1202,34 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 // ==================== STYLES ====================
 const styles = {
   container: {
-    display: "flex",
-    gap: "12px",
-    padding: "12px",
+    position: "relative",
     height: "100vh",
     background: "linear-gradient(#eaf7ea, #f6faf3)",
     fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, Arial',
     overflow: "hidden",
   },
-  panel: {
-    width: "360px",
-    background: "#fff",
-    padding: "14px",
-    borderRadius: "10px",
-    boxShadow: "0 8px 20px rgba(20, 40, 20, 0.06)",
-    overflowY: "auto",
+  topPanel: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    padding: "12px",
+    background: "rgba(255, 255, 255, 0.)",
+    backdropFilter: "blur(1px)",
+    gap: "12px",
+  },
+  topLeft: {
+    flex: 1,
+  },
+  topRight: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    minWidth: "300px",
   },
   title: {
     color: "#2f7a2f",
@@ -1244,21 +1239,26 @@ const styles = {
   muted: {
     color: "#575f56",
     fontSize: "13px",
-    margin: "0 0 12px",
+    margin: 0,
     lineHeight: 1.4,
   },
   videoWrap: {
-    position: "relative",
-    height: "260px",
-    borderRadius: "8px",
+    position: "absolute",
+    top: 0,
+    left: 0,
+    width: "100%",
+    height: "100%",
     overflow: "hidden",
     background: "#111",
-    border: "2px solid #ddd",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1,
   },
   video: {
     width: "100%",
     height: "100%",
-    objectFit: "cover",
+    objectFit: "contain",
     transform: "scaleX(-1)",
   },
   overlay: {
@@ -1268,6 +1268,7 @@ const styles = {
     width: "100%",
     height: "100%",
     pointerEvents: "auto",
+    cursor: "crosshair",
   },
   calibOverlay: {
     position: "absolute",
@@ -1333,7 +1334,6 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     gap: "8px",
-    marginTop: "12px",
   },
   controlButton: {
     padding: "11px",
@@ -1364,7 +1364,6 @@ const styles = {
     cursor: "pointer",
   },
   stats: {
-    marginTop: "12px",
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
     gap: "10px",
@@ -1390,7 +1389,6 @@ const styles = {
   actions: {
     display: "flex",
     gap: "8px",
-    marginTop: "12px",
   },
   actionButton: {
     flex: 1,
@@ -1405,12 +1403,17 @@ const styles = {
     transition: "background 0.2s",
   },
   note: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 20,
     fontSize: "12px",
     color: "#575f56",
-    marginTop: "12px",
     padding: "12px",
-    background: "#f9f9f9",
-    borderRadius: "6px",
+    background: "rgba(255, 255, 255, 0.09)",
+    backdropFilter: "blur(1px)",
+    borderTop: "1px solid rgba(255, 255, 255, 0.2)",
     lineHeight: 1.6,
     borderLeft: "3px solid #2f7a2f",
   },
@@ -1419,26 +1422,11 @@ const styles = {
     display: "block",
     marginBottom: "6px",
   },
-  gameArea: {
-    flex: 1,
-    display: "flex",
-    alignItems: "stretch",
-    position: "relative",
-  },
-  gameCanvas: {
-    flex: 1,
-    borderRadius: "10px",
-    background: "linear-gradient(135deg, #cfead1, #86c98a)",
-    display: "block",
-    width: "100%",
-    height: "100%",
-    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
-  },
   statusMessage: {
     position: "absolute",
-    top: "20px",
+    top: "50%",
     left: "50%",
-    transform: "translateX(-50%)",
+    transform: "translate(-50%, -50%)",
     background: "rgba(255, 255, 255, 0.95)",
     padding: "12px 24px",
     borderRadius: "8px",
@@ -1452,4 +1440,4 @@ const styles = {
   },
 };
 
-export default DrawingGame;
+export default ShapeTracingGame;

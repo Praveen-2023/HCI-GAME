@@ -21,14 +21,14 @@ import SchedulePage from "./pages/doctor/SchedulePage";
 import DoctorCaretakerManagement from "./pages/doctor/DoctorCaretakerManagement";
 
 import CaretakerDashboard from "./pages/caretaker/CaretakerDashboard";
-import GamePage from "./pages/game/GamePage";
+import PianoReactionGame from "./pages/game/PianoReactionGame";
+import ShapeTracingGame from "./pages/game/ShapeTracingGame";
+import BoardDrawingGame from "./pages/game/BoardDrawingGame";
+import FruitBasketGame from "./pages/game/FruitBasketGame";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import CreatePatientForm from "./components/admin/CreatePatientForm";
 import DoctorProfileForm from "./pages/doctor/DoctorProfileForm";
 import PatientSetting from "./pages/patient/PatientSetting";
-import GamePage2 from "./pages/game/GamePage2";
-import DrawingGame from "./pages/game/GamePage3(boardDrawing)";
-import GamePage2BallBasket from "./pages/game/GamePage4(ball&basket)";
 
 function App() {
   return (
@@ -121,35 +121,35 @@ function App() {
             }
           />
           <Route
-            path="/game"
+            path="/piano-reaction"
             element={
               <ProtectedRoute allowedTypes={["patient", "caretaker"]}>
-                <GamePage />
+                <PianoReactionGame />
               </ProtectedRoute>
             }
           />
 
           <Route
-            path="/game2"
+            path="/shape-tracing"
             element={
               <ProtectedRoute allowedTypes={["patient", "caretaker"]}>
-                <GamePage2 />
+                <ShapeTracingGame />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/game3"
+            path="/board-drawing"
             element={
               <ProtectedRoute allowedTypes={["patient", "caretaker"]}>
-                <DrawingGame />
+                <BoardDrawingGame />
               </ProtectedRoute>
             }
           />
           <Route
-            path="/game4"
+            path="/fruit-basket"
             element={
               <ProtectedRoute allowedTypes={["patient", "caretaker"]}>
-                <GamePage2BallBasket />
+                <FruitBasketGame />
               </ProtectedRoute>
             }
           />

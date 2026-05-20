@@ -2,33 +2,40 @@ import { Hands } from "@mediapipe/hands";
 import { Pose } from "@mediapipe/pose";
 import { Camera } from "@mediapipe/camera_utils";
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useAuth } from "../../context/AuthContext";
 
 // ==================== CONFIGURATION ====================
 const CONFIG = {
   SESSION_SECONDS: 300,
-  CALIBRATION_SECONDS: 7, // Reduced from 20 to 7
+  CALIBRATION_SECONDS: 7,
   NUM_SHAPE_POINTS: 20,
   PICK_DISTANCE: 0.08,
-  TRACE_TOLERANCE: 0.03,
+  TRACE_TOLERANCE: 0.05,
   SCORE_PER_SHAPE: 10,
   MIN_COMPLETION: 0.8, // 80% points hit for success
-  SMOOTH_ALPHA: 0.5,
-  STABLE_FRAMES: 5,
+  SMOOTH_ALPHA: 0.7,
+  STABLE_FRAMES: 2,
   DRAW_FPS: 30,
-  THEME: {
-    PRIMARY: "#3B82F6",
-    SECONDARY: "#EC4899",
-    ACCENT: "#8B5CF6",
-  },
 };
 
 // ==================== SHAPE GENERATION ====================
-const SHAPES = ["circle", "triangle", "square", "hexagon"];
+const SHAPES = [
+  "circle",
+  "ellipse",
+  "triangle",
+  "square",
+  "hexagon",
+  "star",
+  "heart",
+  "diamond",
+];
+
+const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
 
 const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
   const centerX = 0.5;
   const centerY = 0.5;
-  let radius = 0.3;
+  let radius = 0.35;
   const points = [];
   const angleStep = (2 * Math.PI) / numPoints;
   for (let i = 0; i < numPoints; i++) {
@@ -50,7 +57,7 @@ const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
         break;
       case "square":
         const t = i / numPoints;
-        const sideFrac = 0.35;
+        const sideFrac = 0.25;
         let frac = t;
         let px, py;
         if (frac < sideFrac) {
@@ -70,29 +77,73 @@ const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
         y = centerY + radius * py;
         break;
       case "hexagon":
-        theta += Math.PI / 3; // Flat top
+        theta += Math.PI / 6; // Flat top
         x = centerX + radius * Math.cos(theta);
         y = centerY + radius * Math.sin(theta);
+        break;
+      case "star":
+        const rInner = radius * 0.4;
+        const rOuter = radius;
+        const r = i % 2 === 0 ? rOuter : rInner;
+        x = centerX + r * Math.cos(theta - Math.PI / 2);
+        y = centerY + r * Math.sin(theta - Math.PI / 2);
+        break;
+      case "heart":
+        const t_h = (i / numPoints) * 2 * Math.PI;
+        // parametric heart: x = 16 sin^3(t), y = 13 cos(t) - 5 cos(2t) - 2 cos(3t) - cos(4t)
+        const hx = 16 * Math.pow(Math.sin(t_h), 3);
+        const hy = -(
+          13 * Math.cos(t_h) -
+          5 * Math.cos(2 * t_h) -
+          2 * Math.cos(3 * t_h) -
+          Math.cos(4 * t_h)
+        );
+        x = centerX + (hx / 16) * radius;
+        y = centerY + (hy / 16) * radius + 0.05; // Slightly offset up
+        break;
+      case "diamond":
+        const td = i / numPoints;
+        if (td < 0.25) {
+          // Top to Right
+          x = centerX + (td / 0.25) * radius;
+          y = centerY - (1 - td / 0.25) * radius;
+        } else if (td < 0.5) {
+          // Right to Bottom
+          x = centerX + (1 - (td - 0.25) / 0.25) * radius;
+          y = centerY + ((td - 0.25) / 0.25) * radius;
+        } else if (td < 0.75) {
+          // Bottom to Left
+          x = centerX - ((td - 0.5) / 0.25) * radius;
+          y = centerY + (1 - (td - 0.5) / 0.25) * radius;
+        } else {
+          // Left to Top
+          x = centerX - (1 - (td - 0.75) / 0.25) * radius;
+          y = centerY - ((td - 0.75) / 0.25) * radius;
+        }
         break;
       default:
         x = centerX + radius * Math.cos(theta);
         y = centerY + radius * Math.sin(theta);
     }
-    points.push({ x, y });
+    // Final Clamp to ensure boundaries
+    points.push({
+      x: clamp(x, 0.05, 0.95),
+      y: clamp(y, 0.05, 0.95),
+    });
   }
   return points;
 };
 
 // ==================== MAIN COMPONENT ====================
-const DrawingGame = () => {
-  const { user, isDarkMode } = useAuth();
+const BoardDrawingGame = () => {
+  const { isDarkMode } = useAuth();
   // State Management
   const [isInitialized, setIsInitialized] = useState(false);
   const [calibrationDone, setCalibrationDone] = useState(false);
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [calibTimeLeft, setCalibTimeLeft] = useState(0);
   const [isSessionActive, setIsSessionActive] = useState(false);
-  const [usingMouseFallback, setUsingMouseFallback] = useState(false);
+  const [usingMouseFallback] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [statusMessage, setStatusMessage] = useState({
     text: "",
@@ -110,11 +161,13 @@ const DrawingGame = () => {
   const [rightHandVisible, setRightHandVisible] = useState(false);
   const [leftHandClosed, setLeftHandClosed] = useState(false);
   const [rightHandClosed, setRightHandClosed] = useState(false);
+  // eslint-disable-next-line no-unused-vars
   const [debugInfo, setDebugInfo] = useState("");
 
   // Refs
   const videoRef = useRef(null);
   const overlayRef = useRef(null);
+  const gameCanvasRef = useRef(null);
   const handsModuleRef = useRef(null);
   const poseModuleRef = useRef(null);
   const cameraRef = useRef(null);
@@ -129,7 +182,6 @@ const DrawingGame = () => {
   const isInitializedRef = useRef(isInitialized);
   const usingMouseFallbackRef = useRef(usingMouseFallback);
   const showDebugRef = useRef(showDebug);
-  const isMountedRef = useRef(true);
 
   // Game State Refs
   const handStateRef = useRef({
@@ -167,13 +219,13 @@ const DrawingGame = () => {
     centerX: 0.5,
     centerY: 0.5,
     maxReachNorm: 0.2,
+    level: 1,
   });
 
   const shapeRef = useRef(null);
   const currentTargetIdxRef = useRef(0);
   const drawnPathRef = useRef([]);
   const lastPoseResultsRef = useRef(null);
-  const detectionCounterRef = useRef(0);
 
   // ==================== UTILITY FUNCTIONS ====================
   const distNorm = (a, b) => {
@@ -203,26 +255,45 @@ const DrawingGame = () => {
   };
 
   // ==================== SPAWN SHAPE ====================
-  const spawnShape = useCallback(() => {
-    const type = SHAPES[Math.floor(Math.random() * SHAPES.length)];
-    const points = generateShapePoints(type);
+  const pickNewShape = useCallback(() => {
+    // Determine shape by level
+    const level = calibrationRef.current.level || 1;
+    let shapeType;
+    if (level <= SHAPES.length) {
+      shapeType = SHAPES[level - 1];
+    } else {
+      shapeType = SHAPES[Math.floor(Math.random() * SHAPES.length)];
+    }
+
+    const points = generateShapePoints(shapeType);
     shapeRef.current = {
-      type,
+      type: shapeType,
       points,
       drawingHand: null,
       startTime: Date.now(),
     };
     currentTargetIdxRef.current = 0;
     drawnPathRef.current = [];
+    setStatusMessage({
+      text: `Level ${level}: Trace the ${shapeType.toUpperCase()}`,
+      visible: true,
+    });
+    setTimeout(
+      () => setStatusMessage((prev) => ({ ...prev, visible: false })),
+      2000,
+    );
+  }, []);
 
+  const spawnShape = useCallback(() => {
+    pickNewShape();
     logsRef.current.push({
       timestamp: nowSec(),
       event: "spawn_shape",
-      shape_type: type,
-      num_points: points.length,
+      shape_type: shapeRef.current.type,
+      num_points: shapeRef.current.points.length,
       score: scoreRef.current,
     });
-  }, []);
+  }, [pickNewShape]);
 
   // ==================== MEDIAPIPE HANDLERS ====================
   const onHandsResults = useCallback((results) => {
@@ -241,7 +312,7 @@ const DrawingGame = () => {
           x: (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5,
           y: (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 5,
         };
-        const rawPos = { x: lm[8].x, y: lm[8].y };
+        const rawPos = { x: palmCenter.x, y: palmCenter.y };
         handState[label].pos = rawPos;
         handState[label].smoothPos = smoothPos(
           handState[label].smoothPos,
@@ -258,7 +329,7 @@ const DrawingGame = () => {
         ];
         let curledFingers = 0;
         fingerPairs.forEach(([tipIdx, midIdx]) => {
-          if (lm[tipIdx].y > lm[midIdx].y + 0.02) curledFingers++;
+          if (lm[tipIdx].y > lm[midIdx].y + 0.03) curledFingers++;
         });
 
         const thumbTipPoint = lm[4];
@@ -271,11 +342,11 @@ const DrawingGame = () => {
         const handSize =
           Math.hypot(middleBase.x - wrist.x, middleBase.y - wrist.y) || 0.05;
         const normalizedThumbDist = thumbToPalm / handSize;
-        const thumbClosed = normalizedThumbDist < 0.6;
+        const thumbClosed = normalizedThumbDist < 0.7;
 
         const fingerSpread = Math.hypot(lm[8].x - lm[20].x, lm[8].y - lm[20].y);
         const normalizedSpread = fingerSpread / handSize;
-        const tightSpread = normalizedSpread < 0.7;
+        const tightSpread = normalizedSpread < 0.8;
 
         const allTips = [4, 8, 12, 16, 20].map((idx) => lm[idx]);
         let avgDistToPalm = 0;
@@ -287,7 +358,7 @@ const DrawingGame = () => {
         });
         avgDistToPalm /= allTips.length;
         const normalizedCompactness = avgDistToPalm / handSize;
-        const veryCompact = normalizedCompactness < 0.8;
+        const veryCompact = normalizedCompactness < 0.9;
 
         const isClosed =
           curledFingers === 4 ||
@@ -323,24 +394,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     setLeftHandVisible(handState.Left.visible);
     setRightHandVisible(handState.Right.visible);
     setLeftHandClosed(handState.Left.closed);
-    setLeftHandClosed(handState.Left.closed);
     setRightHandClosed(handState.Right.closed);
-
-    // Auto-finish calibration if hands are detected early
-    if (
-      calibrationRef.current.active &&
-      (handState.Left.visible || handState.Right.visible)
-    ) {
-      detectionCounterRef.current++;
-      if (detectionCounterRef.current > 45) {
-        // ~1.5 seconds at 30fps
-        if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
-        finishCalibration();
-        detectionCounterRef.current = 0;
-      }
-    } else {
-      detectionCounterRef.current = 0;
-    }
   }, []);
 
   const onPoseResults = useCallback((results) => {
@@ -425,30 +479,19 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       poseModuleRef.current.onResults(onPoseResults);
       cameraRef.current = new Camera(videoRef.current, {
         onFrame: async () => {
-          if (
-            isMountedRef.current &&
-            !usingMouseFallbackRef.current &&
-            isInitializedRef.current &&
-            handsModuleRef.current
-          ) {
-            try {
-              await handsModuleRef.current.send({ image: videoRef.current });
-              if (poseModuleRef.current)
-                await poseModuleRef.current.send({ image: videoRef.current });
-            } catch (err) {
-              console.warn("MediaPipe error:", err);
-            }
+          if (!videoRef.current) return;
+          if (!usingMouseFallbackRef.current && isInitializedRef.current) {
+            await handsModuleRef.current.send({ image: videoRef.current });
+            await poseModuleRef.current.send({ image: videoRef.current });
           }
         },
         width: 640,
         height: 480,
       });
       await cameraRef.current.start();
-      if (isMountedRef.current) {
-        setIsInitialized(true);
-        isInitializedRef.current = true;
-        console.log("✓ Camera started successfully");
-      }
+      setIsInitialized(true);
+      isInitializedRef.current = true;
+      console.log("✓ Camera started successfully");
     } catch (e) {
       console.warn("Camera failed:", e);
       alert(
@@ -494,7 +537,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           while (
             currentTargetIdxRef.current < shape.points.length &&
             distNorm(pos, shape.points[currentTargetIdxRef.current]) <
-              CONFIG.TRACE_TOLERANCE
+            CONFIG.TRACE_TOLERANCE
           ) {
             currentTargetIdxRef.current++;
           }
@@ -520,11 +563,21 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             completion,
           });
           if (completion >= CONFIG.MIN_COMPLETION) {
+            // Shape Success!
+            const newReps = reps + 1;
+            setReps(newReps);
             const newScore = scoreRef.current + CONFIG.SCORE_PER_SHAPE;
             setScore(newScore);
             scoreRef.current = newScore;
-            setReps((prev) => prev + 1);
             successesRef.current++;
+
+            // Advance level every 3 shapes
+            if (newReps % 3 === 0) {
+              calibrationRef.current.level =
+                (calibrationRef.current.level || 1) + 1;
+            }
+
+            pickNewShape();
             attemptsRef.current++;
             logsRef.current.push({
               timestamp: nowSec(),
@@ -571,21 +624,17 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         }
       }
     });
-  }, [spawnShape]);
+  }, [spawnShape, pickNewShape, reps]);
 
   // ==================== DRAWING ====================
   const drawOverlay = useCallback(() => {
     const canvas = overlayRef.current;
-    if (!canvas || !isMountedRef.current) return;
+    if (!canvas) return;
 
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const w = canvas.width;
     const h = canvas.height;
-    const scale = window.devicePixelRatio || 1;
-
-    // Draw pose points
     if (lastPoseResultsRef.current?.poseLandmarks) {
       const pl = lastPoseResultsRef.current.poseLandmarks;
       [
@@ -595,16 +644,14 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         [14, "R-El"],
       ].forEach(([idx]) => {
         if (!pl[idx] || pl[idx].visibility < 0.5) return;
-        const x = 10;
-        const y = 2;
+        const x = pl[idx].x * w;
+        const y = pl[idx].y * h;
         ctx.beginPath();
-        ctx.arc(x, y, 2, 0, Math.PI * 1);
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
         ctx.fillStyle = "rgba(255, 200, 0, 0.8)";
         ctx.fill();
       });
     }
-
-    // Draw hands
     const handState = handStateRef.current;
     ["Left", "Right"].forEach((label) => {
       const hand = handState[label];
@@ -703,35 +750,18 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       ctx.fillStyle = hand.closed ? "#ff6b6b" : "#51cf66";
       ctx.font = "bold 14px Arial";
       ctx.fillText(`${label} ${stateText}`, pcx + 26, pcy);
-
-      // Draw hand cursor using smoothPos (index tip)
-      if (hand.smoothPos) {
-        const px = hand.smoothPos.x * w;
-        const py = hand.smoothPos.y * h;
-        ctx.beginPath();
-        ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
-        ctx.arc(px + 2, py + 2, 14 * scale, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.fillStyle = hand.closed
-          ? "rgba(220, 50, 50, 0.95)"
-          : "rgba(50, 200, 80, 0.95)";
-        ctx.arc(px, py, 14 * scale, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = "#fff";
-        ctx.lineWidth = 3 * scale;
-        ctx.stroke();
-
-        ctx.fillStyle = "#fff";
-        ctx.font = `bold ${12 * scale}px Arial`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(label[0], px, py);
-      }
     });
+  }, []);
 
-    // Draw game elements (shape, points, path)
+  const drawGame = useCallback(() => {
+    const canvas = gameCanvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const w = canvas.width;
+    const h = canvas.height;
+    const scale = window.devicePixelRatio || 1;
     if (shapeRef.current) {
       const shape = shapeRef.current;
       // Draw shape outline
@@ -782,32 +812,75 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         ctx.stroke();
       }
     }
+    const handState = handStateRef.current;
+    ["Left", "Right"].forEach((label) => {
+      const hand = handState[label];
+      if (!hand.smoothPos || !hand.visible) return;
+      const px = hand.smoothPos.x * w;
+      const py = hand.smoothPos.y * h;
+
+      ctx.beginPath();
+      ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
+      ctx.arc(px + 2, py + 2, 14 * scale, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.fillStyle = hand.closed
+        ? "rgba(220, 50, 50, 0.95)"
+        : "rgba(50, 200, 80, 0.95)";
+      ctx.arc(px, py, 14 * scale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 3 * scale;
+      ctx.stroke();
+
+      ctx.fillStyle = "#fff";
+      ctx.font = `bold ${12 * scale}px Arial`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label[0], px, py);
+    });
   }, []);
 
   const syncCanvasSizes = useCallback(() => {
-    if (overlayRef.current && videoRef.current && isMountedRef.current) {
+    if (overlayRef.current && videoRef.current) {
       if (overlayRef.current.width !== videoRef.current.videoWidth) {
         overlayRef.current.width = videoRef.current.videoWidth || 640;
         overlayRef.current.height = videoRef.current.videoHeight || 480;
+      }
+    }
+
+    if (gameCanvasRef.current) {
+      const targetW =
+        gameCanvasRef.current.clientWidth * (window.devicePixelRatio || 1);
+      const targetH =
+        gameCanvasRef.current.clientHeight * (window.devicePixelRatio || 1);
+
+      if (
+        gameCanvasRef.current.width !== targetW ||
+        gameCanvasRef.current.height !== targetH
+      ) {
+        gameCanvasRef.current.width = targetW;
+        gameCanvasRef.current.height = targetH;
       }
     }
   }, []);
 
   // ==================== MAIN LOOP ====================
   const mainLoop = useCallback(() => {
-    if (!isMountedRef.current) return;
     const now = Date.now();
     const drawInterval = 1000 / CONFIG.DRAW_FPS;
 
     if (now - lastDrawTimeRef.current >= drawInterval) {
       syncCanvasSizes();
       drawOverlay();
+      drawGame();
       lastDrawTimeRef.current = now;
     }
 
     gameLogicTick();
     requestAnimationFrame(mainLoop);
-  }, [syncCanvasSizes, drawOverlay, gameLogicTick]);
+  }, [syncCanvasSizes, drawOverlay, drawGame, gameLogicTick]);
 
   // ==================== EVENT HANDLERS ====================
   const handleStartCalibration = () => {
@@ -816,7 +889,6 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     calibrationRef.current.maxX = 0;
     calibrationRef.current.minY = 1;
     calibrationRef.current.maxY = 0;
-    detectionCounterRef.current = 0;
 
     setIsCalibrating(true);
     setCalibTimeLeft(7); // Changed from CONFIG.CALIBRATION_SECONDS to 7
@@ -834,7 +906,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       setCalibTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(calibIntervalRef.current);
-          clearInterval(checkStableInterval);
+          clearInterval(checkStableInterval); // Clear the checkStableInterval too
           finishCalibration();
           return 0;
         }
@@ -924,91 +996,14 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     );
   };
 
-  const handleDownloadCSV = () => {
-    const headers = [
-      "timestamp_sec",
-      "event",
-      "shape_type",
-      "hand",
-      "hits",
-      "total",
-      "completion",
-      "score",
-    ];
-    const rows = [headers.join(",")];
-
-    logsRef.current.forEach((log) => {
-      const row = [
-        log.timestamp ?? "",
-        log.event ?? "",
-        log.shape_type ?? "",
-        log.hand ?? "",
-        log.hits ?? "",
-        log.total ?? "",
-        log.completion ?? "",
-        log.score ?? "",
-      ];
-      rows.push(row.join(","));
-    });
-    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `shape-drawing-${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const handleReset = () => {
     window.location.reload();
   };
 
-  const handleMouseFallbackChange = (e) => {
-    const checked = e.target.checked;
-    setUsingMouseFallback(checked);
-    usingMouseFallbackRef.current = checked;
-    if (checked) {
-      alert(
-        "Mouse fallback enabled. Click/drag on video to control right hand.",
-      );
-      handStateRef.current.Right.visible = true;
-      setRightHandVisible(true);
-    } else {
-      handStateRef.current.Right.visible = false;
-      setRightHandVisible(false);
-    }
-  };
 
-  const handleOverlayMouseMove = (e) => {
-    if (!usingMouseFallbackRef.current) return;
-    const rect = overlayRef.current.getBoundingClientRect();
-    const pos = {
-      x: (e.clientX - rect.left) / rect.width,
-      y: (e.clientY - rect.top) / rect.height,
-    };
-    handStateRef.current.Right.smoothPos = smoothPos(
-      handStateRef.current.Right.smoothPos,
-      pos,
-    );
-    handStateRef.current.Right.visible = true;
-    setRightHandVisible(true);
-  };
 
-  const handleOverlayMouseDown = () => {
-    if (!usingMouseFallbackRef.current) return;
-    handStateRef.current.Right.closedFrames = CONFIG.STABLE_FRAMES;
-    handStateRef.current.Right.openFrames = 0;
-    handStateRef.current.Right.closed = true;
-    setRightHandClosed(true);
-  };
 
-  const handleOverlayMouseUp = () => {
-    if (!usingMouseFallbackRef.current) return;
-    handStateRef.current.Right.openFrames = CONFIG.STABLE_FRAMES;
-    handStateRef.current.Right.closedFrames = 0;
-    handStateRef.current.Right.closed = false;
-    setRightHandClosed(false);
-  };
+
 
   // ==================== EFFECTS ====================
   useEffect(() => {
@@ -1039,221 +1034,234 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
     document.addEventListener("keydown", handleKeyDown);
     return () => {
-      isMountedRef.current = false;
       cancelAnimationFrame(loopId);
       document.removeEventListener("keydown", handleKeyDown);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
-      if (cameraRef.current) {
-        try {
-          cameraRef.current.stop();
-        } catch (e) {
-          console.warn("Error stopping camera:", e);
-        }
-      }
+      if (cameraRef.current) cameraRef.current.stop();
+      if (handsModuleRef.current) handsModuleRef.current.close();
+      if (poseModuleRef.current) poseModuleRef.current.close();
     };
   }, [setupMediaPipe, mainLoop]);
 
   // ==================== RENDER ====================
-  const styles = getStyles(isDarkMode);
+  // ==================== RENDER ====================
+  const themeStyles = {
+    container: {
+      ...styles.container,
+      background: isDarkMode ? "#000" : "#F4F7FE",
+      color: isDarkMode ? "#fff" : "#333",
+    },
+    panel: {
+      ...styles.panel,
+      background: isDarkMode
+        ? "rgba(17, 24, 39, 0.95)"
+        : "rgba(255, 255, 255, 0.95)",
+      borderRight: isDarkMode
+        ? "1px solid rgba(255, 255, 255, 0.1)"
+        : "1px solid rgba(0, 0, 0, 0.1)",
+      backdropFilter: "blur(20px)",
+    },
+    title: {
+      ...styles.title,
+      color: isDarkMode ? "#4ade80" : "#2f7a2f",
+    },
+    muted: {
+      ...styles.muted,
+      color: isDarkMode ? "#94a3b8" : "#575f56",
+    },
+    videoWrap: {
+      ...styles.videoWrap,
+      borderColor: isDarkMode ? "#1f2937" : "#eee",
+      background: "#000",
+    },
+    statItem: {
+      ...styles.statItem,
+      background: isDarkMode ? "#111827" : "#f9f9f9",
+      borderColor: isDarkMode ? "#1f2937" : "#eee",
+    },
+    statValue: {
+      ...styles.statValue,
+      color: isDarkMode ? "#4ade80" : "#2f7a2f",
+    },
+    statLabel: {
+      ...styles.statLabel,
+      color: isDarkMode ? "#94a3b8" : "#575f56",
+    },
+    note: {
+      ...styles.note,
+      background: isDarkMode
+        ? "rgba(0, 0, 0, 0.3)"
+        : "rgba(255, 255, 255, 0.5)",
+      color: isDarkMode ? "#94a3b8" : "#575f56",
+      borderTop: isDarkMode
+        ? "1px solid rgba(255, 255, 255, 0.1)"
+        : "1px solid rgba(0, 0, 0, 0.05)",
+    },
+    statusMessage: {
+      ...styles.statusMessage,
+      background: isDarkMode
+        ? "rgba(17, 24, 39, 0.95)"
+        : "rgba(255, 255, 255, 0.95)",
+      color: isDarkMode ? "#4ade80" : "#2f7a2f",
+      border: isDarkMode ? "1px solid #4ade80" : "none",
+    },
+    actionButton: {
+      ...styles.actionButton,
+      background: isDarkMode ? "#374151" : "#e8e8e8",
+      color: isDarkMode ? "#fff" : "#333",
+    },
+  };
+
   return (
-    <div style={styles.container}>
-      <div style={styles.topPanel}>
-        <div style={styles.topLeft}>
-          <h1 style={styles.title}>✏️ Shape Tracing – Drawing Rehab</h1>
-          <p style={styles.muted}>
-            Upper limb rehabilitation game: Close hand to start tracing at first
-            point, keep closed to follow points in order, open hand after last
-            point to complete. 5-minute therapeutic session.
-          </p>
-        </div>
-        <div style={styles.topRight}>
-          <div style={styles.controls}>
-            <button
-              onClick={handleStartCalibration}
-              style={styles.controlButton}
-              disabled={isCalibrating}
-            >
-              📏 Start 7s Calibration
-            </button>
-            <button
-              onClick={handleStartSession}
-              style={{ ...styles.controlButton }}
-              // disabled={!calibrationDone || isSessionActive}
-            >
-              ▶️ Start 5min Session
-            </button>
-            <label style={styles.checkboxLabel}>
-              <input
-                type="checkbox"
-                checked={usingMouseFallback}
-                onChange={handleMouseFallbackChange}
-                style={styles.checkbox}
-              />
-              <span>Use mouse fallback (if webcam fails)</span>
-            </label>
-          </div>
-          <div style={styles.stats}>
-            <div style={styles.statItem}>
-              <div style={styles.statLabel}>Score</div>
-              <div style={styles.statValue}>{score}</div>
-            </div>
-            <div style={styles.statItem}>
-              <div style={styles.statLabel}>Shapes</div>
-              <div style={styles.statValue}>{reps}</div>
-            </div>
-            <div style={styles.statItem}>
-              <div style={styles.statLabel}>Timer</div>
-              <div style={styles.statValue}>{formatTime(timeRemaining)}</div>
-            </div>
-            <div style={styles.statItem}>
-              <div style={styles.statLabel}>Success</div>
-              <div style={styles.statValue}>{successRate}%</div>
-            </div>
-          </div>
-          <div style={styles.actions}>
-            <button onClick={handleDownloadCSV} style={styles.actionButton}>
-              💾 Download CSV
-            </button>
-            <button onClick={handleReset} style={styles.actionButton}>
-              🔄 Reset
-            </button>
-          </div>
-        </div>
-      </div>
-      <div style={styles.videoWrap}>
-        <video ref={videoRef} autoPlay playsInline muted style={styles.video} />
-        <canvas
-          ref={overlayRef}
-          style={styles.overlay}
-          onMouseMove={handleOverlayMouseMove}
-          onMouseDown={handleOverlayMouseDown}
-          onMouseUp={handleOverlayMouseUp}
-        />
+    <div style={themeStyles.container}>
+      <aside style={themeStyles.panel}>
+        <h1 style={themeStyles.title}>Trace & Master</h1>
+        <p style={themeStyles.muted}>
+          A surgical-grade motor rehabilitation module. Follow the patterns with
+          high precision.
+        </p>
 
-        {isCalibrating && (
-          <div style={styles.calibOverlay}>
-            <div style={styles.calibText}>
-              Calibrating... {calibTimeLeft}s - Move to corners & center!
-            </div>
-          </div>
-        )}
+        <div style={themeStyles.videoWrap}>
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            style={styles.video}
+          />
+          <canvas ref={overlayRef} style={styles.overlay} />
 
-        <div style={styles.handStatus}>
-          {leftHandVisible && (
-            <div
-              style={{
-                ...styles.handIndicator,
-                ...(leftHandClosed ? styles.handClosed : styles.handOpen),
-              }}
-            >
-              <span style={styles.dot}></span>
-              <span>Left - {leftHandClosed ? "CLOSED 🔴" : "OPEN 🟢"}</span>
+          {isCalibrating && (
+            <div style={themeStyles.statusMessage}>
+              Calibrating... {calibTimeLeft}s
             </div>
           )}
-          {rightHandVisible && (
-            <div
-              style={{
-                ...styles.handIndicator,
-                ...(rightHandClosed ? styles.handClosed : styles.handOpen),
-              }}
-            >
-              <span style={styles.dot}></span>
-              <span>Right - {rightHandClosed ? "CLOSED 🔴" : "OPEN 🟢"}</span>
-            </div>
-          )}
+
+          <div style={styles.handStatus}>
+            {leftHandVisible && (
+              <div
+                style={{
+                  ...styles.handIndicator,
+                  ...(leftHandClosed ? styles.handClosed : styles.handOpen),
+                }}
+              >
+                <span style={styles.dot}></span>
+                <span>Left {leftHandClosed ? "🔴" : "🟢"}</span>
+              </div>
+            )}
+            {rightHandVisible && (
+              <div
+                style={{
+                  ...styles.handIndicator,
+                  ...(rightHandClosed ? styles.handClosed : styles.handOpen),
+                }}
+              >
+                <span style={styles.dot}></span>
+                <span>Right {rightHandClosed ? "🔴" : "🟢"}</span>
+              </div>
+            )}
+          </div>
         </div>
 
-        {showDebug && debugInfo && (
-          <div style={styles.debugPanel}>
-            <pre style={{ margin: 0, fontSize: "11px" }}>{debugInfo}</pre>
-          </div>
-        )}
+        <div style={styles.controls}>
+          <button
+            onClick={handleStartCalibration}
+            style={styles.controlButton}
+            disabled={isCalibrating}
+          >
+            📏 Calibrate System
+          </button>
+          <button onClick={handleStartSession} style={styles.controlButton}>
+            {isSessionActive ? "⏸ Pause" : "▶️ Start Therapy"}
+          </button>
+        </div>
 
+        <div style={themeStyles.stats}>
+          <div style={themeStyles.statItem}>
+            <div style={themeStyles.statLabel}>Total Score</div>
+            <div style={themeStyles.statValue}>{score}</div>
+          </div>
+          <div style={themeStyles.statItem}>
+            <div style={themeStyles.statLabel}>Success Rate</div>
+            <div style={themeStyles.statValue}>{Math.round(successRate)}%</div>
+          </div>
+          <div style={themeStyles.statItem}>
+            <div style={themeStyles.statLabel}>Session Timer</div>
+            <div style={themeStyles.statValue}>{formatTime(timeRemaining)}</div>
+          </div>
+        </div>
+
+        <div style={styles.actions}>
+          <button
+            onClick={() => window.history.back()}
+            style={themeStyles.actionButton}
+          >
+            Quit Session
+          </button>
+          <button onClick={handleReset} style={themeStyles.actionButton}>
+            Reset
+          </button>
+        </div>
+
+        <div style={themeStyles.note}>
+          <strong style={themeStyles.statValue}>Clinical Focus:</strong> Fine
+          motor precision and distal control.
+        </div>
+      </aside>
+
+      <main style={styles.gameArea}>
+        <canvas ref={gameCanvasRef} style={styles.gameCanvas} />
         {statusMessage.visible && (
-          <div style={styles.statusMessage}>{statusMessage.text}</div>
+          <div style={themeStyles.statusMessage}>{statusMessage.text}</div>
         )}
-      </div>
-      <div style={styles.note}>
-        <strong style={styles.noteTitle}>How to play:</strong>•{" "}
-        <strong style={{ color: "#dc3545" }}>CLOSE HAND (fist)</strong> near
-        first point (red) to start tracing 🔴
-        <br />
-        • Keep closed, move to follow points in order (green when hit)
-        <br />• <strong style={{ color: "#28a745" }}>OPEN HAND</strong> after
-        last point to complete 🟢
-        <br />
-        • Orange line shows your trace path
-        <br />• Press <strong>'D'</strong> to show debug metrics
-      </div>
+      </main>
     </div>
   );
 };
 
 // ==================== STYLES ====================
-const getStyles = (isDarkMode) => ({
+const styles = {
   container: {
-    position: "relative",
+    display: "flex",
+    gap: "12px",
+    padding: "12px",
     height: "100vh",
-    background: isDarkMode ? "#000" : "linear-gradient(#eaf7ea, #f6faf3)",
+    background: "linear-gradient(#eaf7ea, #f6faf3)",
     fontFamily: 'system-ui, -apple-system, "Segoe UI", Roboto, Arial',
     overflow: "hidden",
   },
-  topPanel: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 20,
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    padding: "12px",
-    background: isDarkMode ? "rgba(0, 0, 0, 0.4)" : "rgba(255, 255, 255, 0.8)",
-    backdropFilter: "blur(10px)",
-    borderBottom: isDarkMode
-      ? "1px solid rgba(255, 255, 255, 0.1)"
-      : "1px solid rgba(0, 0, 0, 0.1)",
-    gap: "12px",
-  },
-  topLeft: {
-    flex: 1,
-  },
-  topRight: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
-    minWidth: "300px",
+  panel: {
+    width: "360px",
+    background: "#fff",
+    padding: "14px",
+    borderRadius: "10px",
+    boxShadow: "0 8px 20px rgba(20, 40, 20, 0.06)",
+    overflowY: "auto",
   },
   title: {
-    color: isDarkMode ? "#4ade80" : "#2f7a2f",
+    color: "#2f7a2f",
     margin: "0 0 8px",
     fontSize: "22px",
-    fontWeight: "800",
   },
   muted: {
-    color: isDarkMode ? "#94a3b8" : "#575f56",
+    color: "#575f56",
     fontSize: "13px",
-    margin: 0,
+    margin: "0 0 12px",
     lineHeight: 1.4,
   },
   videoWrap: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: "100%",
-    height: "100%",
+    position: "relative",
+    height: "260px",
+    borderRadius: "8px",
     overflow: "hidden",
     background: "#111",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 1,
+    border: "2px solid #ddd",
   },
   video: {
     width: "100%",
     height: "100%",
-    objectFit: "contain",
+    objectFit: "cover",
     transform: "scaleX(-1)",
   },
   overlay: {
@@ -1263,24 +1271,19 @@ const getStyles = (isDarkMode) => ({
     width: "100%",
     height: "100%",
     pointerEvents: "auto",
-    cursor: "crosshair",
   },
   calibOverlay: {
     position: "absolute",
-    left: "20px",
-    top: "20px",
-    padding: "16px 24px",
-    background: isDarkMode
-      ? "rgba(30, 41, 59, 0.95)"
-      : "rgba(255, 255, 255, 0.95)",
-    borderRadius: "16px",
+    left: "8px",
+    top: "8px",
+    padding: "10px 14px",
+    background: "rgba(255, 255, 255, 0.95)",
+    borderRadius: "6px",
     zIndex: 10,
-    fontSize: "14px",
-    fontWeight: "700",
-    color: isDarkMode ? "#f8fafc" : "#1e293b",
-    maxWidth: "320px",
-    boxShadow: "0 8px 32px rgba(0, 0, 0, 0.3)",
-    border: isDarkMode ? "1px solid rgba(255,255,255,0.1)" : "none",
+    fontSize: "13px",
+    fontWeight: 500,
+    maxWidth: "280px",
+    boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",
   },
   calibText: {
     margin: 0,
@@ -1333,28 +1336,27 @@ const getStyles = (isDarkMode) => ({
     display: "flex",
     flexDirection: "column",
     gap: "8px",
+    marginTop: "12px",
   },
   controlButton: {
     padding: "11px",
     borderRadius: "8px",
     border: 0,
-    background: isDarkMode ? "#10b981" : "#2f7a2f",
+    background: "#2f7a2f",
     color: "white",
     cursor: "pointer",
     fontSize: "14px",
-    fontWeight: 700,
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
+    fontWeight: 600,
     transition: "all 0.2s",
   },
   buttonDisabled: {
-    background: isDarkMode ? "#374151" : "#ccc",
+    background: "#ccc",
     cursor: "not-allowed",
     opacity: 0.6,
   },
   checkboxLabel: {
     fontSize: "13px",
-    color: isDarkMode ? "#94a3b8" : "#575f56",
+    color: "#575f56",
     marginTop: "6px",
     display: "flex",
     alignItems: "center",
@@ -1365,88 +1367,92 @@ const getStyles = (isDarkMode) => ({
     cursor: "pointer",
   },
   stats: {
+    marginTop: "12px",
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
     gap: "10px",
   },
   statItem: {
     padding: "10px",
-    background: isDarkMode ? "#1e293b" : "#f9f9f9",
-    borderRadius: "8px",
-    border: isDarkMode ? "1px solid rgba(255,255,255,0.05)" : "1px solid #eee",
+    background: "#f9f9f9",
+    borderRadius: "6px",
+    border: "1px solid #eee",
   },
   statLabel: {
-    fontSize: "10px",
-    color: isDarkMode ? "#64748b" : "#575f56",
+    fontSize: "11px",
+    color: "#575f56",
     textTransform: "uppercase",
-    letterSpacing: "1px",
-    fontWeight: "800",
+    letterSpacing: "0.5px",
     marginBottom: "4px",
   },
   statValue: {
     fontSize: "20px",
-    fontWeight: 900,
-    color: isDarkMode ? "#10b981" : "#2f7a2f",
+    fontWeight: 700,
+    color: "#2f7a2f",
   },
   actions: {
     display: "flex",
     gap: "8px",
+    marginTop: "12px",
   },
   actionButton: {
     flex: 1,
     padding: "9px",
     borderRadius: "8px",
     border: 0,
-    background: isDarkMode ? "#334155" : "#e8e8e8",
-    color: isDarkMode ? "#f8fafc" : "#333",
+    background: "#e8e8e8",
+    color: "#333",
     cursor: "pointer",
     fontSize: "13px",
-    fontWeight: 600,
-    transition: "all 0.2s",
+    fontWeight: 500,
+    transition: "background 0.2s",
   },
   note: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 20,
     fontSize: "12px",
-    color: isDarkMode ? "#94a3b8" : "#575f56",
-    padding: "14px",
-    background: isDarkMode ? "rgba(0, 0, 0, 0.6)" : "rgba(255, 255, 255, 0.4)",
-    backdropFilter: "blur(20px)",
-    borderTop: isDarkMode
-      ? "1px solid rgba(255, 255, 255, 0.1)"
-      : "1px solid rgba(0, 0, 0, 0.05)",
+    color: "#575f56",
+    marginTop: "12px",
+    padding: "12px",
+    background: "#f9f9f9",
+    borderRadius: "6px",
     lineHeight: 1.6,
-    borderLeft: `4px solid ${isDarkMode ? "#10b981" : "#2f7a2f"}`,
+    borderLeft: "3px solid #2f7a2f",
   },
   noteTitle: {
-    color: isDarkMode ? "#10b981" : "#2f7a2f",
+    color: "#2f7a2f",
     display: "block",
-    marginBottom: "4px",
-    fontWeight: "800",
-    textTransform: "uppercase",
+    marginBottom: "6px",
+  },
+  gameArea: {
+    flex: 1,
+    display: "flex",
+    alignItems: "stretch",
+    position: "relative",
+  },
+  gameCanvas: {
+    flex: 1,
+    borderRadius: "10px",
+    background: "linear-gradient(135deg, #cfead1, #86c98a)",
+    display: "block",
+    width: "100%",
+    height: "100%",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
   },
   statusMessage: {
     position: "absolute",
-    top: "50%",
+    top: "20px",
     left: "50%",
-    transform: "translate(-50%, -50%)",
-    background: isDarkMode
-      ? "rgba(15, 23, 42, 0.98)"
-      : "rgba(255, 255, 255, 0.95)",
-    padding: "16px 32px",
-    borderRadius: "16px",
-    fontSize: "18px",
-    fontWeight: 800,
-    color: isDarkMode ? "#10b981" : "#2f7a2f",
-    boxShadow: "0 20px 50px rgba(0, 0, 0, 0.4)",
-    zIndex: 100,
+    transform: "translateX(-50%)",
+    background: "rgba(255, 255, 255, 0.95)",
+    padding: "12px 24px",
+    borderRadius: "8px",
+    fontSize: "16px",
+    fontWeight: 600,
+    color: "#2f7a2f",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+    zIndex: 10,
     pointerEvents: "none",
-    border: `2px solid ${isDarkMode ? "#10b981" : "#2f7a2f"}`,
     animation: "slideDown 0.3s ease",
   },
-});
+};
 
-export default DrawingGame;
+export default BoardDrawingGame;
