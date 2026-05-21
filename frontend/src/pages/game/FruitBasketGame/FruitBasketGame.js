@@ -5,10 +5,19 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import gameSessionBuffer from "../../../services/gameSessionBuffer";
 import SaveExitButton from "../SaveExitButton";
+
+// ==================== MEDIAPIPE MODULE-LEVEL SINGLETONS ====================
+// Stored outside the component so React StrictMode's double-mount does NOT
+// create a second set of WASM modules (which corrupts the shared Module namespace).
+let _handsInst = null;
+let _poseInst = null;
+let _camInst = null;
+
 // ==================== CONFIGURATION ====================
 const CONFIG = {
   SESSION_SECONDS: 300,
-  CALIBRATION_SECONDS: 7,
+  CALIBRATION_SECONDS: 20,
+  HAND_TEST_DURATION_MS: 5000, // 5 seconds per hand test
   GRID_ROWS: 3,
   GRID_COLS: 3,
   PICK_DISTANCE: 0.08,
@@ -17,16 +26,25 @@ const CONFIG = {
   SMOOTH_ALPHA: 0.7,
   STABLE_FRAMES: 2,
   DRAW_FPS: 30,
+  PICK_DWELL_MS: 250,
+  DROP_DWELL_MS: 250,
+  TRIAL_TIMEOUT_MS: 10000, // 10 seconds per fruit
+  MIN_SHOULDER_VISIBILITY: 0.5,
+  IDEAL_SHOULDER_Y_RANGE: [0.15, 0.6],
+  MIN_SHOULDER_WIDTH: 0.12,
 };
+
 // ==================== MAIN COMPONENT ====================
 const FruitBasketGame = () => {
   const { isDarkMode } = useAuth();
+  
   // State Management
   const [isInitialized, setIsInitialized] = useState(false);
   const [calibrationDone, setCalibrationDone] = useState(false);
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [calibTimeLeft, setCalibTimeLeft] = useState(0);
   const [isSessionActive, setIsSessionActive] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [usingMouseFallback] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [statusMessage, setStatusMessage] = useState({
@@ -39,6 +57,7 @@ const FruitBasketGame = () => {
   const [reps, setReps] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(300);
   const [successRate, setSuccessRate] = useState(0);
+  const [aratTotalScore, setAratTotalScore] = useState(0);
 
   // Hand State
   const [leftHandVisible, setLeftHandVisible] = useState(false);
@@ -48,13 +67,20 @@ const FruitBasketGame = () => {
   // eslint-disable-next-line no-unused-vars
   const [debugInfo, setDebugInfo] = useState("");
 
+  // Game 2 States
+  const [assistiveMode, setAssistiveMode] = useState(false);
+  const [assistiveModeLeft, setAssistiveModeLeft] = useState(false);
+  const [assistiveModeRight, setAssistiveModeRight] = useState(false);
+  const [isPositionedCorrectly, setIsPositionedCorrectly] = useState(false);
+  const [calibrationStep, setCalibrationStep] = useState("positioning");
+  const [trialTimeLeft, setTrialTimeLeft] = useState(10);
+
   // Refs
   const videoRef = useRef(null);
   const overlayRef = useRef(null);
   const gameCanvasRef = useRef(null);
   const handsModuleRef = useRef(null);
   const poseModuleRef = useRef(null);
-  const cameraRef = useRef(null);
   const sessionStartRef = useRef(null);
   const timerIntervalRef = useRef(null);
   const calibIntervalRef = useRef(null);
@@ -62,10 +88,27 @@ const FruitBasketGame = () => {
   const logsRef = useRef([]);
   const attemptsRef = useRef(0);
   const successesRef = useRef(0);
+  
   const scoreRef = useRef(score);
+  const aratTotalScoreRef = useRef(0);
   const isInitializedRef = useRef(isInitialized);
   const usingMouseFallbackRef = useRef(usingMouseFallback);
   const showDebugRef = useRef(showDebug);
+
+  // Game 2 Refs
+  const assistiveModeRef = useRef(assistiveMode);
+  const assistiveModeLeftRef = useRef(assistiveModeLeft);
+  const assistiveModeRightRef = useRef(assistiveModeRight);
+  const isPositionedCorrectlyRef = useRef(isPositionedCorrectly);
+  const trialStartTimeRef = useRef(null);
+  const trialTimeoutIdRef = useRef(null);
+  const trialIdRef = useRef(0);
+  const lastTrialTimeLeftRef = useRef(10);
+  const handleTrialTimeoutRef = useRef(null);
+  const mainLoopRef = useRef(null);
+  const isProcessingRef = useRef(false);
+  const isPausedRef = useRef(false);
+  const pausedTimeRef = useRef(0); // ms elapsed at the moment of pause
 
   // Game State Refs
   const handStateRef = useRef({
@@ -79,6 +122,11 @@ const FruitBasketGame = () => {
       elbow: null,
       shoulder: null,
       visible: false,
+      assistivePickTimer: 0,
+      assistiveDropTimer: 0,
+      elbowAngle: null,
+      shoulderAngle: null,
+      trunkTwist: null,
     },
     Right: {
       pos: null,
@@ -90,12 +138,18 @@ const FruitBasketGame = () => {
       elbow: null,
       shoulder: null,
       visible: false,
+      assistivePickTimer: 0,
+      assistiveDropTimer: 0,
+      elbowAngle: null,
+      shoulderAngle: null,
+      trunkTwist: null,
     },
   });
 
   const calibrationRef = useRef({
     active: false,
     done: false,
+    frames: [],
     minX: 1,
     maxX: 0,
     minY: 1,
@@ -103,12 +157,22 @@ const FruitBasketGame = () => {
     centerX: 0.5,
     centerY: 0.5,
     maxReachNorm: 0.2,
+    shoulderWidth: 0,
+    step: "positioning", // positioning, left_open, left_close, right_open, right_close, movement, complete
+    leftCanOpen: false,
+    leftCanClose: false,
+    rightCanOpen: false,
+    rightCanClose: false,
+    handTestTimer: null,
+    currentHand: null,
+    currentAction: null,
   });
 
   const gridHolesRef = useRef([]);
   const fruitRef = useRef(null);
   const basketIdxRef = useRef(null);
   const lastPoseResultsRef = useRef(null);
+
   // ==================== UTILITY FUNCTIONS ====================
   const distNorm = (a, b) => {
     if (!a || !b) return 999;
@@ -134,6 +198,24 @@ const FruitBasketGame = () => {
   const showStatus = (msg, duration = 2000) => {
     setStatusMessage({ text: msg, visible: true });
     setTimeout(() => setStatusMessage({ text: "", visible: false }), duration);
+  };
+
+  const calculateAratScore = (trialDurationMs) => {
+    const sec = trialDurationMs / 1000;
+    if (sec < 5) return 3;
+    if (sec < 10) return 2;
+    return 1;
+  };
+
+  // ==================== ANGLE COMPUTATION HELPERS ====================
+  const vecSub = (a, b) => ({ x: a.x - b.x, y: a.y - b.y });
+  const vecDot = (a, b) => a.x * b.x + a.y * b.y;
+  const vecMag = (v) => Math.hypot(v.x, v.y);
+  const vecAngle = (a, b) => {
+    const mag = vecMag(a) * vecMag(b);
+    if (mag === 0) return 0;
+    const cos = Math.max(-1, Math.min(1, vecDot(a, b) / mag));
+    return (Math.acos(cos) * 180) / Math.PI;
   };
   // ==================== SETUP GRID ====================
   const setupGrid = useCallback(() => {
@@ -167,15 +249,84 @@ const FruitBasketGame = () => {
       attachedTo: null,
     };
 
+    if (trialTimeoutIdRef.current) {
+      clearTimeout(trialTimeoutIdRef.current);
+    }
+
+    trialIdRef.current += 1;
+    trialStartTimeRef.current = Date.now();
+    trialTimeoutIdRef.current = setTimeout(() => {
+      if (handleTrialTimeoutRef.current) {
+        handleTrialTimeoutRef.current();
+      }
+    }, CONFIG.TRIAL_TIMEOUT_MS);
+
     logsRef.current.push({
       timestamp: nowSec(),
       event: "spawn",
+      trial_id: trialIdRef.current,
+      mode: (assistiveModeLeftRef.current || assistiveModeRightRef.current) ? "ASSISTIVE" : "NORMAL",
+      hand_function_left: calibrationRef.current.leftCanOpen && calibrationRef.current.leftCanClose ? "full" : "limited",
+      hand_function_right: calibrationRef.current.rightCanOpen && calibrationRef.current.rightCanClose ? "full" : "limited",
       fruit_id: fruitRef.current.id,
-      source: sourceIdx,
-      basket: bIdx,
-      score: scoreRef.current,
+      source_idx: sourceIdx,
+      basket_idx: bIdx,
+      score: aratTotalScoreRef.current,
     });
   }, []);
+
+  // ==================== TRIAL TIMEOUT HANDLER ====================
+  const handleTrialTimeout = useCallback(() => {
+    attemptsRef.current++;
+    const handLabel = fruitRef.current ? fruitRef.current.attachedTo : null;
+
+    logsRef.current.push({
+      timestamp: nowSec(),
+      event: "timeout",
+      trial_id: trialIdRef.current,
+      mode: (assistiveModeLeftRef.current || assistiveModeRightRef.current) ? "ASSISTIVE" : "NORMAL",
+      hand: handLabel || "",
+      hand_function_left: calibrationRef.current.leftCanOpen && calibrationRef.current.leftCanClose ? "full" : "limited",
+      hand_function_right: calibrationRef.current.rightCanOpen && calibrationRef.current.rightCanClose ? "full" : "limited",
+      x_norm: handLabel ? (handStateRef.current[handLabel].smoothPos?.x || "") : "",
+      y_norm: handLabel ? (handStateRef.current[handLabel].smoothPos?.y || "") : "",
+      shoulder_x: handLabel ? (handStateRef.current[handLabel].shoulder?.x || "") : "",
+      shoulder_y: handLabel ? (handStateRef.current[handLabel].shoulder?.y || "") : "",
+      elbow_x: handLabel ? (handStateRef.current[handLabel].elbow?.x || "") : "",
+      elbow_y: handLabel ? (handStateRef.current[handLabel].elbow?.y || "") : "",
+      elbow_angle_deg: handLabel ? (handStateRef.current[handLabel].elbowAngle ?? "") : "",
+      shoulder_angle_deg: handLabel ? (handStateRef.current[handLabel].shoulderAngle ?? "") : "",
+      trunk_twist_deg: handLabel ? (handStateRef.current[handLabel].trunkTwist ?? "") : "",
+      fruit_id: fruitRef.current ? fruitRef.current.id : "",
+      source_idx: fruitRef.current ? fruitRef.current.sourceIdx : "",
+      basket_idx: basketIdxRef.current,
+      trial_duration_sec: (CONFIG.TRIAL_TIMEOUT_MS / 1000).toFixed(2),
+      success: false,
+      arat_score: 0,
+    });
+
+    // Reset timers
+    handStateRef.current.Left.assistivePickTimer = 0;
+    handStateRef.current.Left.assistiveDropTimer = 0;
+    handStateRef.current.Right.assistivePickTimer = 0;
+    handStateRef.current.Right.assistiveDropTimer = 0;
+
+    if (fruitRef.current) {
+      fruitRef.current.attachedTo = null;
+    }
+
+    showStatus("⏱️ Timeout! New fruit spawning...", 2000);
+    spawnFruit();
+
+    const total = attemptsRef.current;
+    const succ = successesRef.current;
+    const rate = total > 0 ? ((succ / total) * 100).toFixed(0) : 0;
+    setSuccessRate(rate);
+  }, [spawnFruit]);
+
+  useEffect(() => {
+    handleTrialTimeoutRef.current = handleTrialTimeout;
+  }, [handleTrialTimeout]);
   // ==================== MEDIAPIPE HANDLERS ====================
   const onHandsResults = useCallback((results) => {
     const handState = handStateRef.current;
@@ -277,6 +428,41 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     setLeftHandClosed(handState.Left.closed);
     setRightHandClosed(handState.Right.closed);
   }, []);
+  const checkPatientPositioning = useCallback(() => {
+    if (!lastPoseResultsRef.current || !lastPoseResultsRef.current.poseLandmarks) {
+      setIsPositionedCorrectly(false);
+      isPositionedCorrectlyRef.current = false;
+      return;
+    }
+    
+    const pl = lastPoseResultsRef.current.poseLandmarks;
+    const leftShoulder = pl[11];
+    const rightShoulder = pl[12];
+    
+    if (!leftShoulder || !rightShoulder || 
+        leftShoulder.visibility < CONFIG.MIN_SHOULDER_VISIBILITY || 
+        rightShoulder.visibility < CONFIG.MIN_SHOULDER_VISIBILITY) {
+      setIsPositionedCorrectly(false);
+      isPositionedCorrectlyRef.current = false;
+      return;
+    }
+    
+    const leftInFrame = leftShoulder.x > 0.1 && leftShoulder.x < 0.9 && 
+                       leftShoulder.y > CONFIG.IDEAL_SHOULDER_Y_RANGE[0] && 
+                       leftShoulder.y < CONFIG.IDEAL_SHOULDER_Y_RANGE[1];
+    
+    const rightInFrame = rightShoulder.x > 0.1 && rightShoulder.x < 0.9 && 
+                        rightShoulder.y > CONFIG.IDEAL_SHOULDER_Y_RANGE[0] && 
+                        rightShoulder.y < CONFIG.IDEAL_SHOULDER_Y_RANGE[1];
+    
+    const shoulderWidth = Math.abs(rightShoulder.x - leftShoulder.x);
+    calibrationRef.current.shoulderWidth = shoulderWidth;
+    
+    const isCorrect = leftInFrame && rightInFrame && shoulderWidth >= CONFIG.MIN_SHOULDER_WIDTH;
+    setIsPositionedCorrectly(isCorrect);
+    isPositionedCorrectlyRef.current = isCorrect;
+  }, []);
+
   const onPoseResults = useCallback((results) => {
     lastPoseResultsRef.current = results;
     const handState = handStateRef.current;
@@ -299,6 +485,35 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       };
       update("Left", 11, 13);
       update("Right", 12, 14);
+
+      // ---------- COMPUTE BIOMECHANICAL ANGLES ----------
+      ["Left", "Right"].forEach((side) => {
+        const shIdx = side === "Left" ? 11 : 12;
+        const elIdx = side === "Left" ? 13 : 14;
+        const sh = pl[shIdx], el = pl[elIdx];
+        if (!sh || !el || sh.visibility < 0.3 || el.visibility < 0.3) {
+          handState[side].elbowAngle = null;
+          handState[side].shoulderAngle = null;
+          handState[side].trunkTwist = null;
+          return;
+        }
+        const wrist = handState[side].smoothPos || { x: 0, y: 0 };
+        const vUpper = vecSub({ x: el.x, y: el.y }, { x: sh.x, y: sh.y });
+        const vFore  = vecSub(wrist, { x: el.x, y: el.y });
+        handState[side].elbowAngle = Math.round(vecAngle(vUpper, vFore));
+        
+        const vTrunk = { x: 0, y: 1 }; // vertical down
+        handState[side].shoulderAngle = Math.round(vecAngle(vUpper, vTrunk));
+        
+        const vUpperH = { x: vUpper.x, y: 0 };
+        const vTrunkH = { x: 1, y: 0 };
+        handState[side].trunkTwist = Math.round(vecAngle(vUpperH, vTrunkH));
+      });
+      // ----------------------------------------------------
+
+      // Check positioning in real time
+      checkPatientPositioning();
+
       if (calibrationRef.current.active) {
         ["Left", "Right"].forEach((label) => {
           if (handState[label].smoothPos) {
@@ -322,52 +537,65 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         });
       }
     }
-  }, []);
+  }, [checkPatientPositioning]);
   // ==================== SETUP MEDIAPIPE ====================
   const setupMediaPipe = useCallback(async () => {
-    if (handsModuleRef.current || poseModuleRef.current) {
-      console.log("MediaPipe already initialized, skipping.");
+    // If singletons already exist, just re-wire the refs and mark initialized.
+    if (_handsInst && _poseInst && _camInst) {
+      handsModuleRef.current = _handsInst;
+      poseModuleRef.current  = _poseInst;
+      // Re-attach the result callbacks (they may point to stale closures after remount)
+      _handsInst.onResults(onHandsResults);
+      _poseInst.onResults(onPoseResults);
+      setIsInitialized(true);
+      isInitializedRef.current = true;
+      console.log("✓ MediaPipe singletons reused after remount");
       return;
     }
-    if (!Hands || !Pose || !Camera) {
-      console.error("MediaPipe libraries not loaded");
-      return;
-    }
+
     try {
-      handsModuleRef.current = new Hands({
+      // ── Hands ─────────────────────────────────────────────────────────
+      _handsInst = new Hands({
         locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`,
       });
-      handsModuleRef.current.setOptions({
+      _handsInst.setOptions({
         selfieMode: true,
         maxNumHands: 2,
         modelComplexity: 1,
         minDetectionConfidence: 0.6,
         minTrackingConfidence: 0.6,
       });
-      handsModuleRef.current.onResults(onHandsResults);
-      poseModuleRef.current = new Pose({
+      _handsInst.onResults(onHandsResults);
+      handsModuleRef.current = _handsInst;
+
+      // ── Pose ──────────────────────────────────────────────────────────
+      _poseInst = new Pose({
         locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`,
       });
-      poseModuleRef.current.setOptions({
+      _poseInst.setOptions({
         modelComplexity: 0,
         smoothLandmarks: true,
         minDetectionConfidence: 0.5,
         minTrackingConfidence: 0.5,
         selfieMode: true,
       });
-      poseModuleRef.current.onResults(onPoseResults);
-      cameraRef.current = new Camera(videoRef.current, {
+      _poseInst.onResults(onPoseResults);
+      poseModuleRef.current = _poseInst;
+
+      // ── Camera (handles getUserMedia + sequential frame delivery) ──────
+      _camInst = new Camera(videoRef.current, {
         onFrame: async () => {
-          if (!videoRef.current) return;
-          if (!usingMouseFallbackRef.current && isInitializedRef.current) {
-            await handsModuleRef.current.send({ image: videoRef.current });
-            await poseModuleRef.current.send({ image: videoRef.current });
-          }
+          if (!videoRef.current || !isInitializedRef.current) return;
+          if (usingMouseFallbackRef.current) return;
+          // Sequential sends – MUST NOT run concurrently (shared WASM Module)
+          await _handsInst.send({ image: videoRef.current });
+          await _poseInst.send({ image: videoRef.current });
         },
         width: 640,
         height: 480,
       });
-      await cameraRef.current.start();
+      await _camInst.start();
+
       setIsInitialized(true);
       isInitializedRef.current = true;
       console.log("✓ Camera started successfully");
@@ -378,98 +606,272 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       );
     }
   }, [onHandsResults, onPoseResults]);
+
   // ==================== GAME LOGIC ====================
   const gameLogicTick = useCallback(() => {
+    // Don't tick game logic while paused
+    if (isPausedRef.current) return;
     if (!fruitRef.current || !sessionStartRef.current) return;
+    
+    // Throttled trial timer update (once per second)
+    const elapsedTrial = (Date.now() - trialStartTimeRef.current) / 1000;
+    const remainingTrial = Math.max(0, CONFIG.TRIAL_TIMEOUT_MS / 1000 - elapsedTrial);
+    const secCeil = Math.ceil(remainingTrial);
+    if (lastTrialTimeLeftRef.current !== secCeil) {
+      lastTrialTimeLeftRef.current = secCeil;
+      setTrialTimeLeft(secCeil);
+    }
+
     const handState = handStateRef.current;
     ["Left", "Right"].forEach((label) => {
       const hand = handState[label];
       if (!hand.smoothPos || !hand.visible) return;
-      if (
-        !fruitRef.current.attachedTo &&
-        hand.closedFrames >= CONFIG.STABLE_FRAMES
-      ) {
-        const source = gridHolesRef.current[fruitRef.current.sourceIdx];
-        const dist = distNorm(hand.smoothPos, source);
 
-        if (dist < CONFIG.PICK_DISTANCE) {
-          fruitRef.current.attachedTo = label;
-          logsRef.current.push({
-            timestamp: nowSec(),
-            event: "pick",
-            fruit_id: fruitRef.current.id,
-            hand: label,
-            source: fruitRef.current.sourceIdx,
-            basket: basketIdxRef.current,
-          });
-          showStatus(`✊ ${label} hand grasped fruit!`, 1000);
-        }
-      }
-      if (
-        fruitRef.current.attachedTo === label &&
-        hand.openFrames >= CONFIG.STABLE_FRAMES
-      ) {
-        const basket = gridHolesRef.current[basketIdxRef.current];
-        const dist = distNorm(hand.smoothPos, basket);
+      const source = gridHolesRef.current[fruitRef.current.sourceIdx];
+      const basket = gridHolesRef.current[basketIdxRef.current];
+      const handDistToSource = distNorm(hand.smoothPos, source);
+      const handDistToBasket = distNorm(hand.smoothPos, basket);
 
-        if (dist < CONFIG.DROP_DISTANCE) {
-          const newScore = scoreRef.current + CONFIG.SCORE_PER_DROP;
-          setScore(newScore);
-          scoreRef.current = newScore;
-          setReps((prev) => prev + 1);
-          successesRef.current++;
-          attemptsRef.current++;
+      const isAssistive = label === "Left" ? assistiveModeLeftRef.current : assistiveModeRightRef.current;
 
-          logsRef.current.push({
-            timestamp: nowSec(),
-            event: "drop_success",
-            fruit_id: fruitRef.current.id,
-            hand: label,
-            source: fruitRef.current.sourceIdx,
-            basket: basketIdxRef.current,
-            score: newScore,
-          });
+      // PICK logic
+      if (!fruitRef.current.attachedTo) {
+        if (isAssistive) {
+          if (handDistToSource < CONFIG.PICK_DISTANCE) {
+            hand.assistivePickTimer += 16.6;
+            if (hand.assistivePickTimer >= CONFIG.PICK_DWELL_MS) {
+              fruitRef.current.attachedTo = label;
+              hand.assistivePickTimer = 0;
 
-          const newRate = (
-            (successesRef.current / attemptsRef.current) *
-            100
-          ).toFixed(0);
-          setSuccessRate(newRate);
+              logsRef.current.push({
+                timestamp: nowSec(),
+                event: "pick",
+                trial_id: trialIdRef.current,
+                mode: "ASSISTIVE",
+                hand: label,
+                hand_function_left: calibrationRef.current.leftCanOpen && calibrationRef.current.leftCanClose ? "full" : "limited",
+                hand_function_right: calibrationRef.current.rightCanOpen && calibrationRef.current.rightCanClose ? "full" : "limited",
+                x_norm: hand.smoothPos.x,
+                y_norm: hand.smoothPos.y,
+                shoulder_x: hand.shoulder?.x || "",
+                shoulder_y: hand.shoulder?.y || "",
+                elbow_x: hand.elbow?.x || "",
+                elbow_y: hand.elbow?.y || "",
+                elbow_angle_deg: hand.elbowAngle ?? "",
+                shoulder_angle_deg: hand.shoulderAngle ?? "",
+                trunk_twist_deg: hand.trunkTwist ?? "",
+                fruit_id: fruitRef.current.id,
+                source_idx: fruitRef.current.sourceIdx,
+                basket_idx: basketIdxRef.current,
+              });
 
-          showStatus(`✅ Success! +${CONFIG.SCORE_PER_DROP} points`, 1500);
-          spawnFruit();
+              showStatus(`🤏 ${label} hand auto-grabbed fruit!`, 1000);
+            }
+          } else {
+            hand.assistivePickTimer = 0;
+          }
         } else {
-          attemptsRef.current++;
-          fruitRef.current.attachedTo = null;
-          fruitRef.current.x =
-            gridHolesRef.current[fruitRef.current.sourceIdx].x;
-          fruitRef.current.y =
-            gridHolesRef.current[fruitRef.current.sourceIdx].y;
+          if (hand.closedFrames >= CONFIG.STABLE_FRAMES && handDistToSource < CONFIG.PICK_DISTANCE) {
+            fruitRef.current.attachedTo = label;
 
-          logsRef.current.push({
-            timestamp: nowSec(),
-            event: "drop_miss",
-            fruit_id: fruitRef.current.id,
-            hand: label,
-            source: fruitRef.current.sourceIdx,
-            basket: basketIdxRef.current,
-          });
+            logsRef.current.push({
+              timestamp: nowSec(),
+              event: "pick",
+              trial_id: trialIdRef.current,
+              mode: "NORMAL",
+              hand: label,
+              hand_function_left: calibrationRef.current.leftCanOpen && calibrationRef.current.leftCanClose ? "full" : "limited",
+              hand_function_right: calibrationRef.current.rightCanOpen && calibrationRef.current.rightCanClose ? "full" : "limited",
+              x_norm: hand.smoothPos.x,
+              y_norm: hand.smoothPos.y,
+              shoulder_x: hand.shoulder?.x || "",
+              shoulder_y: hand.shoulder?.y || "",
+              elbow_x: hand.elbow?.x || "",
+              elbow_y: hand.elbow?.y || "",
+              elbow_angle_deg: hand.elbowAngle ?? "",
+              shoulder_angle_deg: hand.shoulderAngle ?? "",
+              trunk_twist_deg: hand.trunkTwist ?? "",
+              fruit_id: fruitRef.current.id,
+              source_idx: fruitRef.current.sourceIdx,
+              basket_idx: basketIdxRef.current,
+            });
 
-          const newRate = (
-            (successesRef.current / attemptsRef.current) *
-            100
-          ).toFixed(0);
-          setSuccessRate(newRate);
-
-          showStatus("⚠️ Missed! Release over basket", 1500);
+            showStatus(`✊ ${label} hand grasped fruit!`, 1000);
+          }
         }
       }
+
+      // DROP logic
+      if (fruitRef.current.attachedTo === label) {
+        if (isAssistive) {
+          if (handDistToBasket < CONFIG.DROP_DISTANCE) {
+            hand.assistiveDropTimer += 16.6;
+            if (hand.assistiveDropTimer >= CONFIG.DROP_DWELL_MS) {
+              const trialDuration = Date.now() - trialStartTimeRef.current;
+              const aratScore = calculateAratScore(trialDuration);
+
+              const newAratTotal = aratTotalScoreRef.current + aratScore;
+              setAratTotalScore(newAratTotal);
+              aratTotalScoreRef.current = newAratTotal;
+
+              const newScore = scoreRef.current + CONFIG.SCORE_PER_DROP;
+              setScore(newScore);
+              scoreRef.current = newScore;
+
+              setReps((prev) => prev + 1);
+              successesRef.current++;
+              attemptsRef.current++;
+
+              if (trialTimeoutIdRef.current) {
+                clearTimeout(trialTimeoutIdRef.current);
+                trialTimeoutIdRef.current = null;
+              }
+
+              logsRef.current.push({
+                timestamp: nowSec(),
+                event: "drop_success",
+                trial_id: trialIdRef.current,
+                mode: "ASSISTIVE",
+                hand: label,
+                hand_function_left: calibrationRef.current.leftCanOpen && calibrationRef.current.leftCanClose ? "full" : "limited",
+                hand_function_right: calibrationRef.current.rightCanOpen && calibrationRef.current.rightCanClose ? "full" : "limited",
+                x_norm: hand.smoothPos.x,
+                y_norm: hand.smoothPos.y,
+                shoulder_x: hand.shoulder?.x || "",
+                shoulder_y: hand.shoulder?.y || "",
+                elbow_x: hand.elbow?.x || "",
+                elbow_y: hand.elbow?.y || "",
+                elbow_angle_deg: hand.elbowAngle ?? "",
+                shoulder_angle_deg: hand.shoulderAngle ?? "",
+                trunk_twist_deg: hand.trunkTwist ?? "",
+                fruit_id: fruitRef.current.id,
+                source_idx: fruitRef.current.sourceIdx,
+                basket_idx: basketIdxRef.current,
+                trial_duration_sec: (trialDuration / 1000).toFixed(2),
+                success: true,
+                arat_score: aratScore,
+              });
+
+              hand.assistiveDropTimer = 0;
+              const rate = ((successesRef.current / attemptsRef.current) * 100).toFixed(0);
+              setSuccessRate(rate);
+
+              showStatus(`✅ Success! +${CONFIG.SCORE_PER_DROP} points (ARAT: +${aratScore})`, 1500);
+              spawnFruit();
+            }
+          } else {
+            hand.assistiveDropTimer = 0;
+          }
+        } else {
+          if (hand.openFrames >= CONFIG.STABLE_FRAMES) {
+            if (handDistToBasket >= CONFIG.DROP_DISTANCE) {
+              attemptsRef.current++;
+              fruitRef.current.attachedTo = null;
+              fruitRef.current.x = gridHolesRef.current[fruitRef.current.sourceIdx].x;
+              fruitRef.current.y = gridHolesRef.current[fruitRef.current.sourceIdx].y;
+
+              const trialDuration = Date.now() - trialStartTimeRef.current;
+
+              if (trialTimeoutIdRef.current) {
+                clearTimeout(trialTimeoutIdRef.current);
+                trialTimeoutIdRef.current = null;
+              }
+
+              logsRef.current.push({
+                timestamp: nowSec(),
+                event: "drop_miss",
+                trial_id: trialIdRef.current,
+                mode: "NORMAL",
+                hand: label,
+                hand_function_left: calibrationRef.current.leftCanOpen && calibrationRef.current.leftCanClose ? "full" : "limited",
+                hand_function_right: calibrationRef.current.rightCanOpen && calibrationRef.current.rightCanClose ? "full" : "limited",
+                x_norm: hand.smoothPos.x,
+                y_norm: hand.smoothPos.y,
+                shoulder_x: hand.shoulder?.x || "",
+                shoulder_y: hand.shoulder?.y || "",
+                elbow_x: hand.elbow?.x || "",
+                elbow_y: hand.elbow?.y || "",
+                elbow_angle_deg: hand.elbowAngle ?? "",
+                shoulder_angle_deg: hand.shoulderAngle ?? "",
+                trunk_twist_deg: hand.trunkTwist ?? "",
+                fruit_id: fruitRef.current.id,
+                source_idx: fruitRef.current.sourceIdx,
+                basket_idx: basketIdxRef.current,
+                trial_duration_sec: (trialDuration / 1000).toFixed(2),
+                success: false,
+                arat_score: 0,
+              });
+
+              const rate = ((successesRef.current / attemptsRef.current) * 100).toFixed(0);
+              setSuccessRate(rate);
+
+              showStatus("⚠️ Missed! Release over basket", 1500);
+
+              setTimeout(() => {
+                spawnFruit();
+              }, 1500);
+            } else {
+              const trialDuration = Date.now() - trialStartTimeRef.current;
+              const aratScore = calculateAratScore(trialDuration);
+
+              const newAratTotal = aratTotalScoreRef.current + aratScore;
+              setAratTotalScore(newAratTotal);
+              aratTotalScoreRef.current = newAratTotal;
+
+              const newScore = scoreRef.current + CONFIG.SCORE_PER_DROP;
+              setScore(newScore);
+              scoreRef.current = newScore;
+
+              setReps((prev) => prev + 1);
+              successesRef.current++;
+              attemptsRef.current++;
+
+              if (trialTimeoutIdRef.current) {
+                clearTimeout(trialTimeoutIdRef.current);
+                trialTimeoutIdRef.current = null;
+              }
+
+              logsRef.current.push({
+                timestamp: nowSec(),
+                event: "drop_success",
+                trial_id: trialIdRef.current,
+                mode: "NORMAL",
+                hand: label,
+                hand_function_left: calibrationRef.current.leftCanOpen && calibrationRef.current.leftCanClose ? "full" : "limited",
+                hand_function_right: calibrationRef.current.rightCanOpen && calibrationRef.current.rightCanClose ? "full" : "limited",
+                x_norm: hand.smoothPos.x,
+                y_norm: hand.smoothPos.y,
+                shoulder_x: hand.shoulder?.x || "",
+                shoulder_y: hand.shoulder?.y || "",
+                elbow_x: hand.elbow?.x || "",
+                elbow_y: hand.elbow?.y || "",
+                elbow_angle_deg: hand.elbowAngle ?? "",
+                shoulder_angle_deg: hand.shoulderAngle ?? "",
+                trunk_twist_deg: hand.trunkTwist ?? "",
+                fruit_id: fruitRef.current.id,
+                source_idx: fruitRef.current.sourceIdx,
+                basket_idx: basketIdxRef.current,
+                trial_duration_sec: (trialDuration / 1000).toFixed(2),
+                success: true,
+                arat_score: aratScore,
+              });
+
+              const rate = ((successesRef.current / attemptsRef.current) * 100).toFixed(0);
+              setSuccessRate(rate);
+
+              showStatus(`✅ Success! +${CONFIG.SCORE_PER_DROP} points (ARAT: +${aratScore})`, 1500);
+              spawnFruit();
+            }
+          }
+        }
+      }
+
       if (fruitRef.current.attachedTo === label) {
         fruitRef.current.x = hand.smoothPos.x;
         fruitRef.current.y = hand.smoothPos.y;
       }
     });
-  }, [spawnFruit]);
+  }, [spawnFruit, showStatus]);
   // ==================== DRAWING ====================
   const drawOverlay = useCallback(() => {
     const canvas = overlayRef.current;
@@ -481,19 +883,42 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     const h = canvas.height;
     if (lastPoseResultsRef.current?.poseLandmarks) {
       const pl = lastPoseResultsRef.current.poseLandmarks;
-      [
-        [11, "L-Sh"],
-        [12, "R-Sh"],
-        [13, "L-El"],
-        [14, "R-El"],
-      ].forEach(([idx]) => {
-        if (!pl[idx] || pl[idx].visibility < 0.5) return;
-        const x = pl[idx].x * w;
-        const y = pl[idx].y * h;
+      
+      const drawBone = (idx1, idx2) => {
+        const p1 = pl[idx1];
+        const p2 = pl[idx2];
+        if (p1 && p2 && p1.visibility > 0.5 && p2.visibility > 0.5) {
+          ctx.beginPath();
+          ctx.moveTo(p1.x * w, p1.y * h);
+          ctx.lineTo(p2.x * w, p2.y * h);
+          ctx.strokeStyle = "rgba(255, 200, 0, 0.8)";
+          ctx.lineWidth = 4;
+          ctx.stroke();
+        }
+      };
+
+      // Draw shoulder connection line
+      drawBone(11, 12);
+      
+      // Draw left arm (Shoulder -> Elbow -> Wrist)
+      drawBone(11, 13);
+      drawBone(13, 15);
+      
+      // Draw right arm (Shoulder -> Elbow -> Wrist)
+      drawBone(12, 14);
+      drawBone(14, 16);
+
+      // Draw joint indicator dots
+      [11, 12, 13, 14, 15, 16].forEach((idx) => {
+        const p = pl[idx];
+        if (!p || p.visibility < 0.5) return;
         ctx.beginPath();
-        ctx.arc(x, y, 5, 0, Math.PI * 2);
-        ctx.fillStyle = "rgba(255, 200, 0, 0.8)";
+        ctx.arc(p.x * w, p.y * h, 6, 0, Math.PI * 2);
+        ctx.fillStyle = "#ffc107";
         ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
       });
     }
     const handState = handStateRef.current;
@@ -608,24 +1033,28 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     gridHolesRef.current.forEach((hole, idx) => {
       const px = hole.x * w;
       const py = hole.y * h;
-      const r = Math.max(35 * scale, CONFIG.PICK_DISTANCE * Math.min(w, h));
+      const isBasket = idx === basketIdxRef.current;
+      // Basket is drawn 2× larger so it is easy to see and aim for
+      const r = isBasket
+        ? Math.max(70 * scale, CONFIG.DROP_DISTANCE * Math.min(w, h))
+        : Math.max(35 * scale, CONFIG.PICK_DISTANCE * Math.min(w, h));
       ctx.beginPath();
       ctx.fillStyle =
-        idx === basketIdxRef.current
+        isBasket
           ? "rgba(180, 255, 180, 0.9)"
           : "rgba(255, 255, 255, 0.7)";
       ctx.arc(px, py, r, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = idx === basketIdxRef.current ? "#2f7a2f" : "#999";
-      ctx.lineWidth = 3 * scale;
+      ctx.strokeStyle = isBasket ? "#2f7a2f" : "#999";
+      ctx.lineWidth = isBasket ? 4 * scale : 3 * scale;
       ctx.stroke();
       ctx.fillStyle = "#000";
-      ctx.font = `${13 * scale}px Arial`;
+      ctx.font = isBasket ? `${36 * scale}px Arial` : `${13 * scale}px Arial`;
       ctx.textAlign = "center";
       ctx.fillText(
-        idx === basketIdxRef.current ? "🧺" : `${idx}`,
+        isBasket ? "🧺" : `${idx}`,
         px,
-        py + 5 * scale,
+        py + (isBasket ? 10 * scale : 5 * scale),
       );
     });
     if (fruitRef.current) {
@@ -715,70 +1144,221 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       drawOverlay();
       drawGame();
       lastDrawTimeRef.current = now;
+      // Frame delivery to MediaPipe is handled by Camera's onFrame callback
+      // (sequential await hands → pose), NOT here. Running both concurrently
+      // via Promise.all() corrupts the shared WASM Module namespace.
     }
 
     gameLogicTick();
-    requestAnimationFrame(mainLoop);
   }, [syncCanvasSizes, drawOverlay, drawGame, gameLogicTick]);
+  mainLoopRef.current = mainLoop;
   // ==================== EVENT HANDLERS ====================
-  const handleStartCalibration = () => {
-    calibrationRef.current.active = true;
-    calibrationRef.current.minX = 1;
-    calibrationRef.current.maxX = 0;
-    calibrationRef.current.minY = 1;
-    calibrationRef.current.maxY = 0;
-
-    setIsCalibrating(true);
-    setCalibTimeLeft(7); // Changed from CONFIG.CALIBRATION_SECONDS to 7
-
-    // Auto-advance if landmarks are already stable
-    const checkStableInterval = setInterval(() => {
-      if (calibrationRef.current.maxX > 0) {
-        clearInterval(checkStableInterval);
-        clearInterval(calibIntervalRef.current);
-        finishCalibration();
-      }
-    }, 500);
-
-    calibIntervalRef.current = setInterval(() => {
-      setCalibTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(calibIntervalRef.current);
-          clearInterval(checkStableInterval); // Clear the checkStableInterval too
-          finishCalibration();
-          return 0;
+  const monitorHandForDuration = useCallback((handLabel, action, durationMs, onSuccess, onTimeout) => {
+    let startTime = Date.now();
+    let successFrames = 0;
+    const requiredFrames = 3; // Need 3 consecutive successful frames
+    
+    const checkHand = () => {
+      if (!calibrationRef.current.active) return;
+      const elapsed = Date.now() - startTime;
+      const hand = handStateRef.current[handLabel];
+      
+      // Check if hand is visible
+      if (!hand.visible || !hand.smoothPos) {
+        if (elapsed >= durationMs) {
+          onTimeout();
+          return;
         }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-  const finishCalibration = () => {
+        calibrationRef.current.handTestTimer = setTimeout(checkHand, 50);
+        return;
+      }
+      
+      // Check if hand is in the required state
+      const isCorrectState = action === 'open' ? !hand.closed : hand.closed;
+      
+      if (isCorrectState) {
+        successFrames++;
+        if (successFrames >= requiredFrames) {
+          onSuccess();
+          return;
+        }
+      } else {
+        successFrames = 0;
+      }
+      
+      if (elapsed >= durationMs) {
+        onTimeout();
+      } else {
+        // Update progress indicator
+        const remaining = Math.ceil((durationMs - elapsed) / 1000);
+        setCalibTimeLeft(remaining);
+        calibrationRef.current.handTestTimer = setTimeout(checkHand, 50);
+      }
+    };
+    
+    checkHand();
+  }, []);
+
+  const finishCalibration = useCallback(() => {
     calibrationRef.current.active = false;
     setIsCalibrating(false);
-
-    calibrationRef.current.centerX =
-      (calibrationRef.current.minX + calibrationRef.current.maxX) / 2;
-    calibrationRef.current.centerY =
-      (calibrationRef.current.minY + calibrationRef.current.maxY) / 2;
-    const dx = Math.max(
-      Math.abs(calibrationRef.current.centerX - calibrationRef.current.minX),
-      Math.abs(calibrationRef.current.centerX - calibrationRef.current.maxX),
-    );
-    const dy = Math.max(
-      Math.abs(calibrationRef.current.centerY - calibrationRef.current.minY),
-      Math.abs(calibrationRef.current.centerY - calibrationRef.current.maxY),
-    );
+    
+    // Calculate movement range
+    calibrationRef.current.centerX = (calibrationRef.current.minX + calibrationRef.current.maxX) / 2;
+    calibrationRef.current.centerY = (calibrationRef.current.minY + calibrationRef.current.maxY) / 2;
+    const dx = Math.max(Math.abs(calibrationRef.current.centerX - calibrationRef.current.minX), 
+                        Math.abs(calibrationRef.current.centerX - calibrationRef.current.maxX));
+    const dy = Math.max(Math.abs(calibrationRef.current.centerY - calibrationRef.current.minY), 
+                        Math.abs(calibrationRef.current.centerY - calibrationRef.current.maxY));
     calibrationRef.current.maxReachNorm = Math.sqrt(dx * dx + dy * dy) || 0.2;
     calibrationRef.current.done = true;
-
     setCalibrationDone(true);
-    logsRef.current.push({
-      timestamp: 0,
-      event: "calibration_complete",
+    
+    // Determine assistive mode per hand
+    const lAssist = !(calibrationRef.current.leftCanOpen && calibrationRef.current.leftCanClose);
+    const rAssist = !(calibrationRef.current.rightCanOpen && calibrationRef.current.rightCanClose);
+    
+    setAssistiveModeLeft(lAssist);
+    setAssistiveModeRight(rAssist);
+    assistiveModeLeftRef.current = lAssist;
+    assistiveModeRightRef.current = rAssist;
+    
+    // Set global assistive mode (if any hand needs assistance, enable global flag)
+    const globalAssist = lAssist || rAssist;
+    setAssistiveMode(globalAssist);
+    assistiveModeRef.current = globalAssist;
+    
+    // Log results
+    const handFunction = {
+      left: calibrationRef.current.leftCanOpen && calibrationRef.current.leftCanClose ? 'full' : 'limited',
+      right: calibrationRef.current.rightCanOpen && calibrationRef.current.rightCanClose ? 'full' : 'limited'
+    };
+    
+    const assistiveConfig = lAssist && rAssist ? 'full_assistive' :
+                           lAssist ? 'left_assistive' :
+                           rAssist ? 'right_assistive' : 'normal';
+    
+    logsRef.current.push({ 
+      timestamp: 0, 
+      event: 'calibration_complete', 
       calibration: calibrationRef.current,
+      hand_function: handFunction,
+      assistive_config: assistiveConfig
     });
-    showStatus("✓ Calibration complete! Ready to start.");
-  };
+    
+    // Show summary
+    let summary = '✓ Calibration complete!\n\n';
+    summary += `Left Hand: ${handFunction.left === 'full' ? '✅ Full function' : '⚠️ Limited function (dwell assistive)'}\n`;
+    summary += `Right Hand: ${handFunction.right === 'full' ? '✅ Full function' : '⚠️ Limited function (dwell assistive)'}\n\n`;
+    summary += `Mode: ${assistiveConfig === 'normal' ? 'Normal' : 
+                           assistiveConfig === 'full_assistive' ? 'Full Assistive' :
+                           assistiveConfig.includes('left') ? 'Left Assistive' : 'Right Assistive'}`;
+    
+    alert(summary);
+    showStatus('Ready to start game!', 3000);
+  }, []);
+
+  const runCalibrationStep = useCallback(() => {
+    // Clear any existing timer
+    if (calibrationRef.current.handTestTimer) {
+      clearTimeout(calibrationRef.current.handTestTimer);
+      calibrationRef.current.handTestTimer = null;
+    }
+    
+    const step = calibrationRef.current.step;
+    setCalibrationStep(step);
+    
+    switch(step) {
+      case 'left_open':
+        setCalibTimeLeft(5);
+        calibrationRef.current.currentHand = 'Left';
+        calibrationRef.current.currentAction = 'open';
+        monitorHandForDuration('Left', 'open', CONFIG.HAND_TEST_DURATION_MS, () => {
+          calibrationRef.current.leftCanOpen = true;
+          calibrationRef.current.step = 'left_close';
+          runCalibrationStep();
+        }, () => {
+          calibrationRef.current.leftCanOpen = false;
+          calibrationRef.current.step = 'left_close';
+          runCalibrationStep();
+        });
+        break;
+        
+      case 'left_close':
+        setCalibTimeLeft(5);
+        calibrationRef.current.currentHand = 'Left';
+        calibrationRef.current.currentAction = 'close';
+        monitorHandForDuration('Left', 'close', CONFIG.HAND_TEST_DURATION_MS, () => {
+          calibrationRef.current.leftCanClose = true;
+          calibrationRef.current.step = 'right_open';
+          runCalibrationStep();
+        }, () => {
+          calibrationRef.current.leftCanClose = false;
+          calibrationRef.current.step = 'right_open';
+          runCalibrationStep();
+        });
+        break;
+        
+      case 'right_open':
+        setCalibTimeLeft(5);
+        calibrationRef.current.currentHand = 'Right';
+        calibrationRef.current.currentAction = 'open';
+        monitorHandForDuration('Right', 'open', CONFIG.HAND_TEST_DURATION_MS, () => {
+          calibrationRef.current.rightCanOpen = true;
+          calibrationRef.current.step = 'right_close';
+          runCalibrationStep();
+        }, () => {
+          calibrationRef.current.rightCanOpen = false;
+          calibrationRef.current.step = 'right_close';
+          runCalibrationStep();
+        });
+        break;
+        
+      case 'right_close':
+        setCalibTimeLeft(5);
+        calibrationRef.current.currentHand = 'Right';
+        calibrationRef.current.currentAction = 'close';
+        monitorHandForDuration('Right', 'close', CONFIG.HAND_TEST_DURATION_MS, () => {
+          calibrationRef.current.rightCanClose = true;
+          calibrationRef.current.step = 'movement';
+          runCalibrationStep();
+        }, () => {
+          calibrationRef.current.rightCanClose = false;
+          calibrationRef.current.step = 'movement';
+          runCalibrationStep();
+        });
+        break;
+        
+      case 'movement':
+        setCalibTimeLeft(5);
+        calibrationRef.current.minX = 1; calibrationRef.current.maxX = 0;
+        calibrationRef.current.minY = 1; calibrationRef.current.maxY = 0;
+        calibrationRef.current.handTestTimer = setTimeout(() => {
+          calibrationRef.current.step = 'complete';
+          runCalibrationStep();
+        }, 5000);
+        break;
+        
+      case 'complete':
+        finishCalibration();
+        break;
+      default:
+        break;
+    }
+  }, [monitorHandForDuration, finishCalibration]);
+
+  const handleStartCalibration = useCallback(() => {
+    calibrationRef.current.active = true;
+    calibrationRef.current.done = false;
+    calibrationRef.current.step = 'left_open';
+    calibrationRef.current.leftCanOpen = false;
+    calibrationRef.current.leftCanClose = false;
+    calibrationRef.current.rightCanOpen = false;
+    calibrationRef.current.rightCanClose = false;
+    
+    setIsCalibrating(true);
+    runCalibrationStep();
+  }, [runCalibrationStep]);
   const handleStartSession = () => {
     if (!calibrationDone) {
       if (!window.confirm("Calibration recommended. Continue anyway?")) return;
@@ -786,11 +1366,17 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
     setScore(0);
     scoreRef.current = 0;
+    setAratTotalScore(0);
+    aratTotalScoreRef.current = 0;
+    trialIdRef.current = 0;
     setReps(0);
     attemptsRef.current = 0;
     successesRef.current = 0;
     logsRef.current = [];
     sessionStartRef.current = Date.now();
+    pausedTimeRef.current = 0;
+    isPausedRef.current = false;
+    setIsPaused(false);
 
     setupGrid();
     spawnFruit();
@@ -799,7 +1385,8 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     setIsSessionActive(true);
 
     timerIntervalRef.current = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 1000);
+      if (isPausedRef.current) return; // freeze timer while paused
+      const elapsed = Math.floor((Date.now() - sessionStartRef.current - pausedTimeRef.current) / 1000);
       const remaining = Math.max(0, CONFIG.SESSION_SECONDS - elapsed);
       setTimeRemaining(remaining);
 
@@ -810,12 +1397,115 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     }, 1000);
 
     logsRef.current.push({ timestamp: 0, event: "session_start" });
-    // Init local session buffer
     gameSessionBuffer.init('fruit_basket', 'Arm – Fruit Fetch');
     showStatus("🎮 Session started! Close hand to grab fruit!", 3000);
   };
+
+  const handlePauseResume = () => {
+    if (!isSessionActive) return;
+    if (!isPausedRef.current) {
+      // ── PAUSE ────────────────────────────────────────
+      isPausedRef.current = true;
+      setIsPaused(true);
+      // Record when we paused so we can subtract that dead time from elapsed
+      pausedTimeRef._pauseStartedAt = Date.now();
+      // Freeze the trial timeout too
+      if (trialTimeoutIdRef.current) {
+        clearTimeout(trialTimeoutIdRef.current);
+        trialTimeoutIdRef._remainingAtPause =
+          CONFIG.TRIAL_TIMEOUT_MS -
+          (Date.now() - trialStartTimeRef.current);
+      }
+      logsRef.current.push({ timestamp: nowSec(), event: "session_pause" });
+      showStatus("⏸️ Session paused", 2000);
+    } else {
+      // ── RESUME ──────────────────────────────────────
+      const pausedDuration = Date.now() - pausedTimeRef._pauseStartedAt;
+      pausedTimeRef.current += pausedDuration; // accumulate paused ms
+
+      // Re-schedule trial timeout for remaining time
+      const remaining = trialTimeoutIdRef._remainingAtPause;
+      if (remaining != null && remaining > 0) {
+        trialStartTimeRef.current = Date.now() - (CONFIG.TRIAL_TIMEOUT_MS - remaining);
+        trialTimeoutIdRef.current = setTimeout(() => {
+          if (handleTrialTimeoutRef.current) handleTrialTimeoutRef.current();
+        }, remaining);
+      }
+
+      isPausedRef.current = false;
+      setIsPaused(false);
+      logsRef.current.push({ timestamp: nowSec(), event: "session_resume" });
+      showStatus("▶️ Session resumed!", 2000);
+    }
+  };
+  const saveSessionDataToBuffer = useCallback(() => {
+    const playData = logsRef.current
+      .filter(log => ['drop_success', 'drop_miss', 'timeout'].includes(log.event))
+      .map(log => {
+        let correct = 0;
+        let responseTimeVal = -1;
+        
+        if (log.event === 'drop_success') {
+          correct = 1;
+          responseTimeVal = log.trial_duration_sec ? parseFloat(log.trial_duration_sec) : 0;
+        } else if (log.event === 'drop_miss') {
+          correct = -1;
+          responseTimeVal = log.trial_duration_sec ? parseFloat(log.trial_duration_sec) : 0;
+        } else if (log.event === 'timeout') {
+          correct = 0;
+          responseTimeVal = -1;
+        }
+        
+        return {
+          responsetime: responseTimeVal,
+          correct: correct,
+          eventName: log.event,
+          score: log.score || scoreRef.current,
+          hand: log.hand || '',
+          trial_id: log.trial_id || 0,
+          mode: log.mode || ''
+        };
+      });
+
+    const coordinateLogs = logsRef.current.map(log => ({
+      timestamp: log.timestamp,
+      event: log.event,
+      trialId: log.trial_id || 0,
+      mode: log.mode || '',
+      hand: log.hand || '',
+      handFunctionLeft: log.hand_function_left || '',
+      handFunctionRight: log.hand_function_right || '',
+      xNorm: log.x_norm || 0,
+      yNorm: log.y_norm || 0,
+      shoulderX: log.shoulder_x || 0,
+      shoulderY: log.shoulder_y || 0,
+      elbowX: log.elbow_x || 0,
+      elbowY: log.elbow_y || 0,
+      elbowAngle: log.elbow_angle_deg || 0,
+      shoulderAngle: log.shoulder_angle_deg || 0,
+      trunkTwist: log.trunk_twist_deg || 0,
+      fruitId: log.fruit_id || '',
+      sourceIdx: log.source_idx || 0,
+      basketIdx: log.basket_idx || 0,
+      success: log.success || false,
+      aratScore: log.arat_score || 0
+    }));
+
+    gameSessionBuffer.update({
+      sessionScore: scoreRef.current,
+      playData,
+      coordinates: coordinateLogs
+    });
+  }, []);
+
   const handleEndSession = async () => {
     setIsSessionActive(false);
+
+    if (trialTimeoutIdRef.current) {
+      clearTimeout(trialTimeoutIdRef.current);
+      trialTimeoutIdRef.current = null;
+    }
+
     logsRef.current.push({
       timestamp: nowSec(),
       event: "session_end",
@@ -827,20 +1517,10 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         ? ((successesRef.current / attemptsRef.current) * 100).toFixed(1)
         : 0;
 
-    // Buffer play data locally
-    const playData = logsRef.current.map(log => ({
-      eventName: log.event,
-      score: log.score,
-      hand: log.hand,
-      responsetime: log.timestamp
-    }));
-    gameSessionBuffer.update({
-      sessionScore: scoreRef.current,
-      playData
-    });
+    saveSessionDataToBuffer();
 
     alert(
-      `Session Complete!\n\nScore: ${scoreRef.current}\nReps: ${reps}\nSuccess Rate: ${successRateVal}%\n\nUse the 💾 Save & Exit button to save your data.`,
+      `Session Complete!\n\nScore: ${scoreRef.current}\nARAT Score: ${aratTotalScoreRef.current}\nReps: ${reps}\nSuccess Rate: ${successRateVal}%\n\nUse the 💾 Save & Exit button to save your data.`,
     );
   };
 
@@ -893,7 +1573,15 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     setupGrid();
     setupMediaPipe();
 
-    const loopId = requestAnimationFrame(mainLoop);
+    let loopId;
+    const runLoop = () => {
+      if (mainLoopRef.current) {
+        mainLoopRef.current();
+      }
+      loopId = requestAnimationFrame(runLoop);
+    };
+    loopId = requestAnimationFrame(runLoop);
+
     const handleKeyDown = (e) => {
       if (e.key === "d" || e.key === "D") {
         setShowDebug((prev) => !prev);
@@ -906,11 +1594,11 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       document.removeEventListener("keydown", handleKeyDown);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
-      if (cameraRef.current) cameraRef.current.stop();
-      if (handsModuleRef.current) handsModuleRef.current.close();
-      if (poseModuleRef.current) poseModuleRef.current.close();
+      // Do NOT stop _camInst or close _handsInst/_poseInst here.
+      // They are module-level singletons that must survive React StrictMode
+      // remounts. Destroying them causes WASM re-init conflicts on next mount.
     };
-  }, [setupGrid, setupMediaPipe, mainLoop]);
+  }, []);
   // ==================== RENDER ====================
   const themeStyles = {
     container: {
@@ -982,6 +1670,31 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           Grasp, transport, and release fruits into the basket to improve
           coordination.
         </p>
+        
+        {/* Side panel calibration instructions overlay */}
+        {isCalibrating && (
+          <div style={styles.calibOverlaySide}>
+            <div style={styles.stepCounter}>
+              Step {calibrationStep === 'left_open' ? '1' : 
+                    calibrationStep === 'left_close' ? '2' : 
+                    calibrationStep === 'right_open' ? '3' : 
+                    calibrationStep === 'right_close' ? '4' : '5'}/5
+            </div>
+            <strong style={{ fontSize: '14px', display: 'block', margin: '4px 0', color: '#fff' }}>
+              {calibrationStep === 'left_open' && "LEFT HAND: OPEN PALM ✋"}
+              {calibrationStep === 'left_close' && "LEFT HAND: CLOSED FIST ✊"}
+              {calibrationStep === 'right_open' && "RIGHT HAND: OPEN PALM ✋"}
+              {calibrationStep === 'right_close' && "RIGHT HAND: CLOSED FIST ✊"}
+              {calibrationStep === 'movement' && "MOVE BOTH HANDS TO CORNERS"}
+            </strong>
+            <em style={{ fontStyle: 'normal', opacity: 0.9, fontSize: '12px' }}>
+              {calibrationStep === 'movement' 
+                ? `${calibTimeLeft} seconds remaining...`
+                : `Hold for ${calibTimeLeft}s...`}
+            </em>
+          </div>
+        )}
+
         <div style={themeStyles.videoWrap}>
           <video
             ref={videoRef}
@@ -998,9 +1711,48 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             onMouseUp={handleOverlayMouseUp}
           />
 
-          {isCalibrating && (
-            <div style={themeStyles.statusMessage}>
-              Calibrating... {calibTimeLeft}s
+          {/* Posture check pill */}
+          <div style={styles.positionIndicator}>
+            {isPositionedCorrectly ? (
+              <div style={{ ...styles.posStatus, color: "#28a745" }}>
+                🟢 Position OK
+              </div>
+            ) : (
+              <div style={{ ...styles.posStatus, color: "#dc3545" }}>
+                🔴 Align Posture
+              </div>
+            )}
+          </div>
+
+          {/* Floating Debug Panel */}
+          {showDebug && (
+            <div style={styles.debugPanel}>
+              <pre style={{ margin: 0, whiteSpace: "pre-wrap", fontSize: '9px', lineHeight: '1.2' }}>
+                {`DEBUG TELEMETRY:
+Left Hand:
+  Visible: ${leftHandVisible ? "YES" : "NO"}
+  Closed: ${leftHandClosed ? "YES" : "NO"}
+  Elbow Angle: ${handStateRef.current.Left.elbowAngle ?? "--"}°
+  Shoulder Angle: ${handStateRef.current.Left.shoulderAngle ?? "--"}°
+  Trunk Twist: ${handStateRef.current.Left.trunkTwist ?? "--"}°
+  Pick Dwell: ${Math.round(handStateRef.current.Left.assistivePickTimer)}ms
+  Drop Dwell: ${Math.round(handStateRef.current.Left.assistiveDropTimer)}ms
+
+Right Hand:
+  Visible: ${rightHandVisible ? "YES" : "NO"}
+  Closed: ${rightHandClosed ? "YES" : "NO"}
+  Elbow Angle: ${handStateRef.current.Right.elbowAngle ?? "--"}°
+  Shoulder Angle: ${handStateRef.current.Right.shoulderAngle ?? "--"}°
+  Trunk Twist: ${handStateRef.current.Right.trunkTwist ?? "--"}°
+  Pick Dwell: ${Math.round(handStateRef.current.Right.assistivePickTimer)}ms
+  Drop Dwell: ${Math.round(handStateRef.current.Right.assistiveDropTimer)}ms
+
+Calibration:
+  Step: ${calibrationStep}
+  Left Assist: ${assistiveModeLeft ? "YES" : "NO"}
+  Right Assist: ${assistiveModeRight ? "YES" : "NO"}
+`}
+              </pre>
             </div>
           )}
 
@@ -1037,14 +1789,49 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           >
             📏 Calibrate
           </button>
-          <button onClick={handleStartSession} style={styles.controlButton}>
-            {isSessionActive ? "Pause" : "Start Session"}
+          <button onClick={handleStartSession} style={styles.controlButton} disabled={isSessionActive}>
+            Start Session
           </button>
+          {isSessionActive && (
+            <button
+              onClick={handlePauseResume}
+              style={{
+                ...styles.controlButton,
+                background: isPaused ? "#2f7a2f" : "#e6a817",
+              }}
+            >
+              {isPaused ? "▶️ Resume" : "⏸️ Pause"}
+            </button>
+          )}
+          
+          <label style={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={assistiveMode}
+              disabled={isSessionActive}
+              onChange={(e) => {
+                const val = e.target.checked;
+                setAssistiveMode(val);
+                assistiveModeRef.current = val;
+                setAssistiveModeLeft(val);
+                assistiveModeLeftRef.current = val;
+                setAssistiveModeRight(val);
+                assistiveModeRightRef.current = val;
+              }}
+              style={styles.checkbox}
+            />
+            <span>Assistive Mode (Dwell pick/drop)</span>
+          </label>
         </div>
+        
         <div style={themeStyles.stats}>
           <div style={themeStyles.statItem}>
             <div style={themeStyles.statLabel}>Score</div>
             <div style={themeStyles.statValue}>{score}</div>
+          </div>
+          <div style={themeStyles.statItem}>
+            <div style={themeStyles.statLabel}>ARAT Score</div>
+            <div style={themeStyles.statValue}>{aratTotalScore}</div>
           </div>
           <div style={themeStyles.statItem}>
             <div style={themeStyles.statLabel}>Reps</div>
@@ -1054,11 +1841,12 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             <div style={themeStyles.statLabel}>Timer</div>
             <div style={themeStyles.statValue}>{formatTime(timeRemaining)}</div>
           </div>
-          <div style={themeStyles.statItem}>
-            <div style={themeStyles.statLabel}>Success</div>
+          <div style={themeStyles.statItem} style={{ gridColumn: "span 2", textAlign: "center" }}>
+            <div style={themeStyles.statLabel}>Success Rate</div>
             <div style={themeStyles.statValue}>{successRate}%</div>
           </div>
         </div>
+        
         <div style={styles.actions}>
           <button
             onClick={() => {
@@ -1079,23 +1867,24 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         </div>
         <div style={themeStyles.note}>
           <strong style={themeStyles.statValue}>Pro-tip:</strong> Watch the
-          skeletal feedback for grip status.
+          skeletal feedback for grip status. Toggles debug telemetry with 'D' key.
         </div>
       </aside>
       <main style={styles.gameArea}>
         <canvas ref={gameCanvasRef} style={styles.gameCanvas} />
+        
+        {isSessionActive && (
+          <div style={styles.trialTimer}>
+            ⏱️ {trialTimeLeft}s
+          </div>
+        )}
+
         {statusMessage.visible && (
           <div style={themeStyles.statusMessage}>{statusMessage.text}</div>
         )}
       </main>
       <SaveExitButton onBeforeSave={() => {
-        const playData = logsRef.current.map(log => ({
-          eventName: log.event,
-          score: log.score,
-          hand: log.hand,
-          responsetime: log.timestamp
-        }));
-        gameSessionBuffer.update({ sessionScore: scoreRef.current, playData });
+        saveSessionDataToBuffer();
       }} />
     </div>
   );
@@ -1152,18 +1941,43 @@ const styles = {
     height: "100%",
     pointerEvents: "auto",
   },
-  calibOverlay: {
+  calibOverlaySide: {
     position: "absolute",
-    left: "8px",
-    top: "8px",
+    top: 0,
+    left: 0,
+    right: 0,
+    background: "#2f7a2f",
+    color: "white",
     padding: "10px 14px",
-    background: "rgba(255, 255, 255, 0.95)",
+    borderRadius: "0 0 6px 6px",
+    zIndex: 15,
+    fontSize: "13px",
+    fontWeight: "600",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+    textAlign: "center",
+  },
+  stepCounter: {
+    display: "inline-block",
+    background: "rgba(255, 255, 255, 0.2)",
+    padding: "2px 8px",
+    borderRadius: "10px",
+    fontSize: "11px",
+    marginBottom: "4px",
+  },
+  positionIndicator: {
+    position: "absolute",
+    top: "8px",
+    left: "8px",
+    padding: "6px 12px",
+    background: "rgba(255, 255, 255, 0.9)",
     borderRadius: "6px",
     zIndex: 10,
-    fontSize: "13px",
-    fontWeight: 500,
-    maxWidth: "280px",
+    fontSize: "12px",
+    fontWeight: "600",
     boxShadow: "0 2px 8px rgba(0, 0, 0, 0.2)",
+  },
+  posStatus: {
+    fontWeight: "700",
   },
   calibText: {
     margin: 0,
@@ -1332,6 +2146,22 @@ const styles = {
     zIndex: 10,
     pointerEvents: "none",
     animation: "slideDown 0.3s ease",
+  },
+  trialTimer: {
+    position: "absolute",
+    top: "20px",
+    right: "20px",
+    background: "rgba(255, 255, 255, 0.95)",
+    padding: "12px 24px",
+    borderRadius: "8px",
+    fontSize: "24px",
+    fontWeight: "700",
+    color: "#dc3545",
+    boxShadow: "0 4px 12px rgba(0, 0, 0, 0.15)",
+    zIndex: 9,
+    pointerEvents: "none",
+    minWidth: "80px",
+    textAlign: "center",
   },
 };
 export default FruitBasketGame;
