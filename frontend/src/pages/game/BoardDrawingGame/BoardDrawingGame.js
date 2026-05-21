@@ -5,6 +5,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import gameSessionBuffer from "../../../services/gameSessionBuffer";
 import SaveExitButton from "../SaveExitButton";
+import { COORD_SAMPLE_INTERVAL_MS, MAX_COORDS_PER_SESSION } from "../../../constants";
 // ==================== CONFIGURATION ====================
 const CONFIG = {
   SESSION_SECONDS: 300,
@@ -183,6 +184,10 @@ const BoardDrawingGame = () => {
   const isInitializedRef = useRef(isInitialized);
   const usingMouseFallbackRef = useRef(usingMouseFallback);
   const showDebugRef = useRef(showDebug);
+  const coordinateLogRef = useRef([]);
+  const lastCoordTimeRef = useRef(0);
+  const animationFrameRef = useRef(null);
+  const isUnmountingRef = useRef(false);
 
   // Game State Refs
   const handStateRef = useRef({
@@ -254,6 +259,50 @@ const BoardDrawingGame = () => {
     setStatusMessage({ text: msg, visible: true });
     setTimeout(() => setStatusMessage({ text: "", visible: false }), duration);
   };
+  const safeCloseModule = useCallback((moduleRef, moduleName) => {
+    if (!moduleRef.current) return;
+    try {
+      moduleRef.current.close();
+    } catch (error) {
+      const errMsg = error ? (error.message || String(error)) : "";
+      if (!errMsg.includes("already deleted")) {
+        console.warn(`Failed to close ${moduleName}:`, error);
+      }
+    } finally {
+      moduleRef.current = null;
+    }
+  }, []);
+  const buildBufferedSessionData = useCallback(() => {
+    const playData = logsRef.current.map((log) => {
+      const {
+        event,
+        score: eventScore,
+        hand,
+        timestamp,
+        shape_type,
+        ...metaFields
+      } = log;
+      const meta = Object.fromEntries(
+        Object.entries(metaFields).filter(([, value]) => value !== undefined),
+      );
+      const entry = {
+        eventName: event,
+        score: eventScore,
+        hand,
+        responsetime: timestamp,
+        shapeType: shape_type,
+      };
+      if (Object.keys(meta).length > 0) {
+        entry.meta = meta;
+      }
+      return entry;
+    });
+    return {
+      sessionScore: scoreRef.current,
+      playData,
+      coordinates: coordinateLogRef.current.map((point) => ({ ...point })),
+    };
+  }, []);
 
   // ==================== SPAWN SHAPE ====================
   const pickNewShape = useCallback(() => {
@@ -481,9 +530,19 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       cameraRef.current = new Camera(videoRef.current, {
         onFrame: async () => {
           if (!videoRef.current) return;
+          if (isUnmountingRef.current) return;
           if (!usingMouseFallbackRef.current && isInitializedRef.current) {
-            await handsModuleRef.current.send({ image: videoRef.current });
-            await poseModuleRef.current.send({ image: videoRef.current });
+            const handsModule = handsModuleRef.current;
+            const poseModule = poseModuleRef.current;
+            if (!handsModule || !poseModule) return;
+            try {
+              await handsModule.send({ image: videoRef.current });
+              await poseModule.send({ image: videoRef.current });
+            } catch (error) {
+              if (!String(error?.message || "").includes("already deleted")) {
+                console.warn("MediaPipe frame processing error:", error);
+              }
+            }
           }
         },
         width: 640,
@@ -510,6 +569,19 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       const hand = handState[label];
       if (!hand.smoothPos || !hand.visible) return;
       const pos = hand.smoothPos;
+      
+      // Track downsampled coordinates for relative hand trajectory visualization
+      if (sessionStartRef.current && Date.now() - lastCoordTimeRef.current > COORD_SAMPLE_INTERVAL_MS) {
+        if (coordinateLogRef.current.length < MAX_COORDS_PER_SESSION) {
+          coordinateLogRef.current.push({
+            x: pos.x,
+            y: pos.y,
+            timestamp: nowSec()
+          });
+        }
+        lastCoordTimeRef.current = Date.now();
+      }
+
       const isDrawing = shape.drawingHand === label;
       if (
         !shape.drawingHand &&
@@ -518,7 +590,8 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       ) {
         if (distNorm(pos, shape.points[0]) < CONFIG.PICK_DISTANCE) {
           shape.drawingHand = label;
-          drawnPathRef.current = [{ ...pos }];
+          const startPoint = { ...pos };
+          drawnPathRef.current = [startPoint];
           currentTargetIdxRef.current = 1;
           logsRef.current.push({
             timestamp: nowSec(),
@@ -533,7 +606,8 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         }
       } else if (isDrawing) {
         if (hand.closed) {
-          drawnPathRef.current.push({ ...pos });
+          const tracedPoint = { ...pos };
+          drawnPathRef.current.push(tracedPoint);
           // Advance targets if close
           while (
             currentTargetIdxRef.current < shape.points.length &&
@@ -880,7 +954,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     }
 
     gameLogicTick();
-    requestAnimationFrame(mainLoop);
+    animationFrameRef.current = requestAnimationFrame(mainLoop);
   }, [syncCanvasSizes, drawOverlay, drawGame, gameLogicTick]);
 
   // ==================== EVENT HANDLERS ====================
@@ -955,6 +1029,8 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     attemptsRef.current = 0;
     successesRef.current = 0;
     logsRef.current = [];
+    coordinateLogRef.current = [];
+    lastCoordTimeRef.current = 0;
     sessionStartRef.current = Date.now();
 
     spawnShape();
@@ -995,19 +1071,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         ? ((successesRef.current / attemptsRef.current) * 100).toFixed(1)
         : 0;
 
-    // Buffer play data locally
-    const playData = logsRef.current.map(log => ({
-      eventName: log.event,
-      score: log.score,
-      hand: log.hand,
-      responsetime: log.timestamp,
-      shapeType: log.shape_type
-    }));
-    gameSessionBuffer.update({
-      sessionScore: scoreRef.current,
-      playData,
-      coordinates: drawnPathRef.current.map(p => ({ x: p.x, y: p.y, timestamp: nowSec() }))
-    });
+    gameSessionBuffer.update(buildBufferedSessionData());
 
     alert(
       `Session Complete!\n\nScore: ${scoreRef.current}\nShapes Completed: ${reps}\nSuccess Rate: ${successRateVal}%\n\nUse the 💾 Save & Exit button to save your data.`,
@@ -1025,6 +1089,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
   // ==================== EFFECTS ====================
   useEffect(() => {
+    isUnmountingRef.current = false;
     scoreRef.current = score;
   }, [score]);
 
@@ -1040,27 +1105,64 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     showDebugRef.current = showDebug;
   }, [showDebug]);
 
-  useEffect(() => {
-    setupMediaPipe();
+  // Mount-only: initialize MediaPipe + camera ONCE. Never re-run on state changes.
+  // Using a ref to hold setupMediaPipe so the dependency array stays stable.
+  const setupMediaPipeRef = React.useRef(setupMediaPipe);
+  setupMediaPipeRef.current = setupMediaPipe;
+  const safeCloseModuleRef = React.useRef(safeCloseModule);
+  safeCloseModuleRef.current = safeCloseModule;
 
-    const loopId = requestAnimationFrame(mainLoop);
+  useEffect(() => {
+    setupMediaPipeRef.current();
+
     const handleKeyDown = (e) => {
       if (e.key === "d" || e.key === "D") {
         setShowDebug((prev) => !prev);
       }
     };
-
     document.addEventListener("keydown", handleKeyDown);
+
     return () => {
-      cancelAnimationFrame(loopId);
+      isUnmountingRef.current = true;
       document.removeEventListener("keydown", handleKeyDown);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
-      if (cameraRef.current) cameraRef.current.stop();
-      if (handsModuleRef.current) handsModuleRef.current.close();
-      if (poseModuleRef.current) poseModuleRef.current.close();
+      if (cameraRef.current) {
+        try {
+          cameraRef.current.stop();
+        } catch (error) {
+          console.warn("Failed to stop camera:", error);
+        } finally {
+          cameraRef.current = null;
+        }
+      }
+      safeCloseModuleRef.current(handsModuleRef, "hands");
+      safeCloseModuleRef.current(poseModuleRef, "pose");
+      isInitializedRef.current = false;
     };
-  }, [setupMediaPipe, mainLoop]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount/unmount only
+
+  // Separate effect to (re)start the animation loop when mainLoop ref changes
+  const mainLoopRef = React.useRef(mainLoop);
+  mainLoopRef.current = mainLoop;
+
+  useEffect(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    const loop = () => {
+      mainLoopRef.current();
+    };
+    animationFrameRef.current = requestAnimationFrame(loop);
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount/unmount only — mainLoopRef always has latest via ref
 
   // ==================== RENDER ====================
   // ==================== RENDER ====================
@@ -1242,18 +1344,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         )}
       </main>
       <SaveExitButton onBeforeSave={() => {
-        const playData = logsRef.current.map(log => ({
-          eventName: log.event,
-          score: log.score,
-          hand: log.hand,
-          responsetime: log.timestamp,
-          shapeType: log.shape_type
-        }));
-        gameSessionBuffer.update({
-          sessionScore: scoreRef.current,
-          playData,
-          coordinates: drawnPathRef.current.map(p => ({ x: p.x, y: p.y }))
-        });
+        gameSessionBuffer.update(buildBufferedSessionData());
       }} />
     </div>
   );

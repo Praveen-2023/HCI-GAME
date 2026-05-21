@@ -40,7 +40,6 @@ import {
   TrendingUp,
   Target,
   Award,
-  AlertCircle,
   Sun,
   Moon,
   Download,
@@ -392,31 +391,319 @@ const DarkModeToggle = ({ isDarkMode, setIsDarkMode, collapsed }) => (
 );
 
 const CoordinateVisualizer = ({ coordinates }) => {
-  if (!coordinates || coordinates.length === 0) return null;
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [currentIdx, setCurrentIdx] = React.useState(0);
+  const [playbackSpeed, setPlaybackSpeed] = React.useState(1);
+  const [isLooping, setIsLooping] = React.useState(false);
+  const timerRef = React.useRef(null);
+
+  React.useEffect(() => {
+    setCurrentIdx(0);
+    setIsPlaying(false);
+  }, [coordinates]);
+
+  React.useEffect(() => {
+    if (isPlaying) {
+      const intervalTime = Math.max(10, Math.min(200, 150 / playbackSpeed));
+      timerRef.current = setInterval(() => {
+        setCurrentIdx((prev) => {
+          if (prev >= coordinates.length - 1) {
+            if (isLooping) {
+              return 0;
+            } else {
+              setIsPlaying(false);
+              return prev;
+            }
+          }
+          return prev + 1;
+        });
+      }, intervalTime);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isPlaying, coordinates, playbackSpeed, isLooping]);
+
+  // Filter out any malformed entries that are missing x or y fields
+  const validCoords = Array.isArray(coordinates)
+    ? coordinates.filter(p => p && typeof p.x === 'number' && typeof p.y === 'number')
+    : [];
+
+  if (validCoords.length === 0) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 border border-gray-100 dark:border-gray-700 text-center mt-6 shadow-sm">
+        <div className="mb-3 text-5xl">🖐️</div>
+        <p className="font-bold text-gray-800 dark:text-gray-200 mb-1 text-lg">No Movement Data Yet</p>
+        <p className="text-sm text-gray-400 max-w-md mx-auto leading-relaxed">
+          Hand trajectory is recorded automatically during gameplay. Play a session to see your movement path, velocity profile, and tremor analysis here.
+        </p>
+        <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/30 rounded-xl text-amber-700 dark:text-amber-400 text-xs font-bold">
+          <span>ℹ️</span> Coordinates are sampled every second during active sessions
+        </div>
+      </div>
+    );
+  }
+
+  // Clamp currentIdx to valid range after filtering
+  const safeIdx = Math.min(currentIdx, validCoords.length - 1);
+  const currentPoint = validCoords[safeIdx] || validCoords[0];
+
+  // Calculate clinical metrics
+  let totalDistance = 0;
+  let maxSpeed = 0;
+  let jitterSum = 0;
+  const speeds = [];
+
+  for (let i = 1; i < validCoords.length; i++) {
+    const p1 = validCoords[i - 1];
+    const p2 = validCoords[i];
+    const d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    totalDistance += d;
+
+    // dt is ~150ms if timestamps are missing
+    const dt = p2.timestamp !== undefined && p1.timestamp !== undefined 
+      ? (p2.timestamp - p1.timestamp) 
+      : 0.15;
+    const speed = d / (dt || 0.15);
+    speeds.push(speed);
+    if (speed > maxSpeed) maxSpeed = speed;
+
+    if (i > 1) {
+      const prevSpeed = speeds[i - 2];
+      jitterSum += Math.abs(speed - prevSpeed);
+    }
+  }
+
+  const avgSpeed = speeds.length > 0 ? speeds.reduce((a, b) => a + b, 0) / speeds.length : 0;
+  const jitterScore = speeds.length > 1 ? (jitterSum / (speeds.length - 1)) * 100 : 0;
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 border dark:border-gray-700 mt-6 shadow-sm">
-      <h3 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-4">
-        Movement Pattern (Last Session)
-      </h3>
-      <div className="relative w-full aspect-video bg-gray-50 dark:bg-gray-900 rounded-lg overflow-hidden border dark:border-gray-800">
-        <svg viewBox="0 0 100 100" className="w-full h-full" preserveAspectRatio="none">
-          <polyline
-            points={coordinates.map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
-            fill="none"
-            stroke="#10B981"
-            strokeWidth="0.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          {coordinates.map((p, i) => (
-            <circle key={i} cx={p.x * 100} cy={p.y * 100} r={i === 0 || i === coordinates.length - 1 ? "1.5" : "0.5"} fill={i === 0 ? "#3B82F6" : i === coordinates.length - 1 ? "#EF4444" : "#10B981"} />
-          ))}
-        </svg>
-        <div className="absolute top-2 left-2 flex gap-3 text-xs bg-white/80 dark:bg-black/50 p-1.5 rounded-md backdrop-blur-sm shadow-sm border border-white/20 dark:border-white/10">
-          <span className="flex items-center gap-1 text-gray-700 dark:text-gray-300 font-medium"><div className="w-2 h-2 rounded-full bg-blue-500"></div> Start</span>
-          <span className="flex items-center gap-1 text-gray-700 dark:text-gray-300 font-medium"><div className="w-2 h-2 rounded-full bg-green-500"></div> Path</span>
-          <span className="flex items-center gap-1 text-gray-700 dark:text-gray-300 font-medium"><div className="w-2 h-2 rounded-full bg-red-500"></div> End</span>
+    <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 mt-6 shadow-md transition-all duration-300">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b dark:border-gray-700 pb-4">
+        <div>
+          <h3 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-secondary-600 dark:from-primary-400 dark:to-secondary-400">
+            Movement Path Trajectory & Replay
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-medium">
+            Visualize relative hand displacement, velocity profiles, and clinical tremor patterns.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="px-3 py-1 bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 text-xs font-bold rounded-full">
+            {coordinates.length} positions
+          </span>
+          <span className="px-3 py-1 bg-primary-50 dark:bg-primary-950/30 text-primary-600 dark:text-primary-400 text-xs font-bold rounded-full">
+            1s Sample Rate
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Playback Canvas Area */}
+        <div className="lg:col-span-2 flex flex-col justify-between">
+          <div className="relative w-full aspect-video bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 shadow-inner group">
+            {/* Grid Pattern */}
+            <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:5%_5%] opacity-20"></div>
+            
+            {/* SVG Trajectory */}
+            <svg viewBox="0 0 100 100" className="w-full h-full p-4" preserveAspectRatio="none">
+              {/* Full trace path (faint background) */}
+              <polyline
+                points={validCoords.map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
+                fill="none"
+                stroke="#4b5563"
+                strokeWidth="0.75"
+                strokeDasharray="2,2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              
+              {/* Played path */}
+              <polyline
+                points={validCoords.slice(0, safeIdx + 1).map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
+                fill="none"
+                stroke="#10B981"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="transition-all duration-75"
+              />
+
+              {/* Start & End Points */}
+              <circle cx={validCoords[0].x * 100} cy={validCoords[0].y * 100} r="1.5" fill="#3B82F6" stroke="#fff" strokeWidth="0.5" />
+              <circle cx={validCoords[validCoords.length-1].x * 100} cy={validCoords[validCoords.length-1].y * 100} r="1.5" fill="#EF4444" stroke="#fff" strokeWidth="0.5" />
+
+              {/* Current Position pointer */}
+              <circle
+                cx={currentPoint.x * 100}
+                cy={currentPoint.y * 100}
+                r="3.5"
+                fill="#3B82F6"
+                fillOpacity="0.4"
+                className="animate-pulse"
+              />
+              <circle
+                cx={currentPoint.x * 100}
+                cy={currentPoint.y * 100}
+                r="1.8"
+                fill="#3B82F6"
+                stroke="#fff"
+                strokeWidth="0.5"
+              />
+            </svg>
+
+            {/* Labels overlay */}
+            <div className="absolute top-3 left-3 flex gap-2 text-[10px] bg-black/75 px-2.5 py-1 rounded-lg border border-gray-800 text-gray-300 font-bold backdrop-blur-sm shadow-md">
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Start</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Path</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500"></span> End</span>
+            </div>
+            
+            <div className="absolute bottom-3 right-3 text-[10px] bg-black/75 px-2 py-1 rounded-lg border border-gray-800 text-gray-400 font-mono">
+              Point {safeIdx + 1}/{validCoords.length}
+            </div>
+          </div>
+
+          {/* Controls Bar */}
+          <div className="mt-4 flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setIsPlaying(!isPlaying)}
+                className={`p-2.5 rounded-xl flex items-center justify-center text-white transition-all transform active:scale-95 ${
+                  isPlaying 
+                    ? "bg-amber-500 hover:bg-amber-600" 
+                    : "bg-primary-500 hover:bg-primary-600"
+                }`}
+                title={isPlaying ? "Pause" : "Play"}
+              >
+                {isPlaying ? (
+                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                ) : (
+                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                )}
+              </button>
+              
+              <button
+                onClick={() => { setIsPlaying(false); setCurrentIdx(0); }}
+                className="p-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-xl transition-all active:scale-95 border dark:border-gray-600"
+                title="Reset"
+              >
+                <svg className="w-4 h-4 fill-none stroke-current" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3-3 3 3m-3-3v12" />
+                </svg>
+              </button>
+
+              {/* Scrubber slider */}
+              <div className="flex-1 flex items-center">
+                <input
+                  type="range"
+                  min="0"
+                  max={validCoords.length - 1}
+                  value={safeIdx}
+                  onChange={(e) => {
+                    setIsPlaying(false);
+                    setCurrentIdx(parseInt(e.target.value));
+                  }}
+                  className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                />
+              </div>
+
+              {/* Speed */}
+              <select
+                value={playbackSpeed}
+                onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+                className="px-2 py-1.5 text-xs font-bold bg-gray-100 dark:bg-gray-700 border dark:border-gray-600 rounded-lg outline-none cursor-pointer dark:text-white"
+              >
+                <option value="0.5">0.5x</option>
+                <option value="1">1.0x</option>
+                <option value="2">2.0x</option>
+                <option value="4">4.0x</option>
+              </select>
+
+              {/* Loop */}
+              <button
+                onClick={() => setIsLooping(!isLooping)}
+                className={`p-2 rounded-lg border transition-all ${
+                  isLooping 
+                    ? "bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800" 
+                    : "bg-transparent text-gray-400 border-gray-200 dark:border-gray-700"
+                }`}
+                title="Loop"
+              >
+                <svg className="w-4 h-4 fill-none stroke-current" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3-3 3 3" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Clinical Statistics Panel */}
+        <div className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-5 border dark:border-gray-800 flex flex-col justify-between">
+          <div>
+            <h4 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">
+              Kinematic Metrics
+            </h4>
+            
+            <div className="space-y-3.5">
+              {/* Total Distance */}
+              <div className="flex justify-between items-center border-b dark:border-gray-800 pb-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Path Distance</span>
+                <span className="text-xs font-bold dark:text-white">{totalDistance.toFixed(2)} units</span>
+              </div>
+              
+              {/* Avg Speed */}
+              <div className="flex justify-between items-center border-b dark:border-gray-800 pb-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Avg Velocity</span>
+                <span className="text-xs font-bold dark:text-white">{(avgSpeed * 10).toFixed(1)} units/s</span>
+              </div>
+
+              {/* Peak Speed */}
+              <div className="flex justify-between items-center border-b dark:border-gray-800 pb-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Peak Velocity</span>
+                <span className="text-xs font-bold dark:text-white">{(maxSpeed * 10).toFixed(1)} units/s</span>
+              </div>
+
+              {/* Jitter / Tremor score */}
+              <div className="flex justify-between items-center pb-1">
+                <div className="flex flex-col">
+                  <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Jitter (Tremor Index)</span>
+                </div>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                  jitterScore < 8 
+                    ? "text-green-600 bg-green-50 dark:bg-green-950/20" 
+                    : jitterScore < 18 
+                      ? "text-yellow-600 bg-yellow-50 dark:bg-yellow-950/20" 
+                      : "text-red-600 bg-red-50 dark:bg-red-950/20"
+                }`}>
+                  {jitterScore.toFixed(1)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Real-time details card */}
+          <div className="mt-4 bg-white dark:bg-gray-800 p-3 rounded-xl border dark:border-gray-700">
+            <h5 className="text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1.5">
+              Live Tracker (Frame {safeIdx + 1})
+            </h5>
+            <div className="grid grid-cols-2 gap-2 text-[10px]">
+              <div>
+                <p className="text-gray-400 font-medium">Coordinates X, Y</p>
+                <p className="font-bold font-mono text-gray-800 dark:text-gray-200">
+                  {(currentPoint?.x ?? 0).toFixed(3)}, {(currentPoint?.y ?? 0).toFixed(3)}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-400 font-medium">Session Time</p>
+                <p className="font-bold font-mono text-gray-800 dark:text-gray-200">
+                  {currentPoint?.timestamp != null ? `${currentPoint.timestamp.toFixed(2)}s` : `${(safeIdx * 0.15).toFixed(2)}s`}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -424,6 +711,42 @@ const CoordinateVisualizer = ({ coordinates }) => {
 };
 
 // Extracted Dashboard content into its own component
+const GAMES_LIST = [
+  {
+    type: "type1",
+    name: "Piano Reaction Game",
+    path: "/piano-reaction",
+    desc: "Tests and improves cognitive reaction speeds by tapping highlighted piano keys in response to stimuli.",
+    clinicalFocus: "Cognitive processing speed, manual dexterity, and hand-eye coordination.",
+    hasCoordinates: false,
+    icon: "🎹",
+    color: "from-violet-700 to-indigo-800",
+    accent: "#7C3AED",
+  },
+  {
+    type: "board_drawing",
+    name: "Board Drawing",
+    path: "/board-drawing",
+    desc: "Traces complex board paths to evaluate distal hand movements, precision, and tremor control.",
+    clinicalFocus: "Fine motor control, hand tremor reduction, and continuous movement precision.",
+    hasCoordinates: true,
+    icon: "✏️",
+    color: "from-blue-700 to-cyan-800",
+    accent: "#2563EB",
+  },
+  {
+    type: "fruit_basket",
+    name: "Arm – Fruit Fetch",
+    path: "/fruit-basket",
+    desc: "Grasp and move falling fruits into a basket using full arm gestures to improve range of motion.",
+    clinicalFocus: "Gross motor coordination, shoulder/elbow articulation, and spatial reaching velocity.",
+    hasCoordinates: true,
+    icon: "🍎",
+    color: "from-orange-600 to-amber-700",
+    accent: "#EA580C",
+  },
+];
+
 const DashboardContent = ({
   userData,
   user,
@@ -442,6 +765,7 @@ const DashboardContent = ({
   // Game Selector State
   const defaultGameType = stats?.games?.[0]?.type || "type1";
   const [selectedGameType, setSelectedGameType] = useState(defaultGameType);
+  const [viewMode, setViewMode] = useState("home"); // "home" or "details"
 
   useEffect(() => {
     setIsMounted(true);
@@ -678,7 +1002,6 @@ const DashboardContent = ({
     return null;
   };
 
-  console.log(selectedSessionData);
 
   // Fetch reminders
   useEffect(() => {
@@ -751,6 +1074,7 @@ const DashboardContent = ({
     [editingReminder, userId],
   );
 
+  // Restore handleMarkDone that was accidentally removed
   const handleMarkDone = useCallback(
     async (reminderId) => {
       try {
@@ -764,747 +1088,594 @@ const DashboardContent = ({
     [userId],
   );
 
+  // ── Extra home-view computations ─────────────────────────────────────────────
+  const selectedGame = GAMES_LIST.find(g => g.type === selectedGameType);
+
+  const totalSessionsAllGames = useMemo(() => {
+    if (!stats?.games) return recentSessions.length;
+    return stats.games.reduce((sum, g) => sum + (g.recentSessions?.length || 0), 0);
+  }, [stats, recentSessions]);
+
+  const todaySessionsCount = useMemo(() => {
+    const todayStr = new Date().toISOString().split('T')[0];
+    if (!stats?.games) return 0;
+    return stats.games.reduce((count, g) => {
+      return count + (g.recentSessions || []).filter(s =>
+        new Date(s.time).toISOString().split('T')[0] === todayStr
+      ).length;
+    }, 0);
+  }, [stats]);
+
+  const weekAccuracyAllGames = useMemo(() => {
+    const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    if (!stats?.games) return avgAcc7Sessions;
+    const allWeekSessions = stats.games.flatMap(g =>
+      (g.recentSessions || []).filter(s => new Date(s.time) >= oneWeekAgo)
+    );
+    if (allWeekSessions.length === 0) return 0;
+    const totalAcc = allWeekSessions.reduce((sum, s) => {
+      const tot = (s.correct || 0) + (s.incorrect || 0);
+      return sum + (tot > 0 ? ((s.correct || 0) / tot) * 100 : 0);
+    }, 0);
+    return totalAcc / allWeekSessions.length;
+  }, [stats, avgAcc7Sessions]);
+
+  const weekSparklineData = useMemo(() => {
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(today);
+      d.setDate(d.getDate() - (6 - i));
+      const dateStr = d.toISOString().split('T')[0];
+      const dayStats = dailyData[dateStr];
+      const total = dayStats?.total || 0;
+      const correct = dayStats?.correct || 0;
+      return { day: d.toLocaleDateString('en', { weekday: 'short' }), acc: total > 0 ? (correct / total) * 100 : 0 };
+    });
+  }, [today, dailyData]);
+
+  // Coordinate data: lives at session.coordinates in the API response
+  const selectedCoordinates = (
+    recentSessions[selectedSession]?.session?.coordinates ||
+    recentSessions[selectedSession]?.coordinates ||
+    []
+  );
+
   return (
     <div className="fade-in">
-      {/* Top Bar */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-        <div>
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-secondary-600 dark:from-primary-400 dark:to-secondary-400 capitalize">
-            Hello, {userData?.name || "Your Name"}!
-          </h1>
-          <p className="text-gray-500 dark:text-gray-400 mt-1 font-medium italic">
-            How are you feeling today?
-          </p>
-          
-          {/* Game Stats Selector */}
-          {stats?.games && stats.games.length > 0 && (
-            <div className="mt-4 flex items-center gap-3">
-              <span className="text-sm font-semibold text-gray-500 dark:text-gray-400">View stats for:</span>
-              <select
-                value={selectedGameType}
-                onChange={(e) => setSelectedGameType(e.target.value)}
-                className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-              >
-                {stats.games.map(g => (
-                  <option key={g.type} value={g.type}>{g.name || g.type}</option>
-                ))}
-              </select>
+
+      {/* ═══════════════ DETAIL VIEW (full-width) ═══════════════ */}
+      {viewMode === "details" ? (
+        <div className="space-y-0">
+
+          {/* ── Hero Banner ── */}
+          <div className={`bg-gradient-to-br ${selectedGame?.color || 'from-gray-700 to-gray-800'} rounded-3xl p-8 mb-6 relative overflow-hidden`}>
+            {/* Decorative blobs */}
+            <div className="absolute -right-12 -top-12 w-48 h-48 bg-white/5 rounded-full" />
+            <div className="absolute -right-4 -bottom-8 w-32 h-32 bg-white/5 rounded-full" />
+
+            <div className="relative z-10 flex flex-wrap items-start justify-between gap-6">
+              <div className="flex items-center gap-5">
+                <div className="w-20 h-20 bg-white/10 backdrop-blur-sm rounded-3xl flex items-center justify-center text-5xl shadow-xl border border-white/20">
+                  {selectedGame?.icon}
+                </div>
+                <div>
+                  <p className="text-white/60 text-xs font-bold uppercase tracking-widest mb-1">Game Stats</p>
+                  <h2 className="text-3xl font-black text-white leading-none mb-1">{selectedGame?.name}</h2>
+                  <p className="text-white/70 text-sm font-medium max-w-sm leading-relaxed">{selectedGame?.clinicalFocus}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Quick stat pills */}
+                <div className="flex flex-col items-center bg-white/10 backdrop-blur-sm rounded-2xl px-5 py-3 border border-white/10">
+                  <span className="text-2xl font-black text-white">{recentSessions.length}</span>
+                  <span className="text-[10px] text-white/60 font-bold uppercase tracking-wider">Sessions</span>
+                </div>
+                <div className="flex flex-col items-center bg-white/10 backdrop-blur-sm rounded-2xl px-5 py-3 border border-white/10">
+                  <span className="text-2xl font-black text-white">
+                    {recentSessions.length > 0 ? Math.max(...recentSessions.map(s => s.sessionScore || 0), 0) : 0}
+                  </span>
+                  <span className="text-[10px] text-white/60 font-bold uppercase tracking-wider">Best Score</span>
+                </div>
+                <div className="flex flex-col items-center bg-white/10 backdrop-blur-sm rounded-2xl px-5 py-3 border border-white/10">
+                  <span className="text-2xl font-black text-white">{avgAcc7Sessions.toFixed(0)}%</span>
+                  <span className="text-[10px] text-white/60 font-bold uppercase tracking-wider">Avg Accuracy</span>
+                </div>
+                <div className="flex flex-col items-center bg-white/10 backdrop-blur-sm rounded-2xl px-5 py-3 border border-white/10">
+                  <span className="text-2xl font-black text-white">
+                    {isNaN(avgResponseTime7Games) ? '—' : `${avgResponseTime7Games.toFixed(1)}s`}
+                  </span>
+                  <span className="text-[10px] text-white/60 font-bold uppercase tracking-wider">Avg Response</span>
+                </div>
+              </div>
             </div>
-          )}
-        </div>
-        {/* Right side: Streak, Theme, Search, Notifications */}
-        <div className="flex items-center gap-3">
-          {/* Streak Indicator - Moved from dashboard content to navbar for better visibility */}
-          <div className="hidden lg:flex px-4 py-2 bg-gray-50 dark:bg-gray-800/50 rounded-2xl items-center gap-2 border border-transparent dark:border-gray-700/30 group hover:border-orange-500/20 transition-all cursor-pointer shadow-sm">
-            <span className="text-xl animate-pulse group-hover:animate-none">
-              🔥
-            </span>
-            <div className="flex flex-col">
-              <span
-                className={`text-base font-black leading-none ${currentStreak > 0 ? (streakData.hasActivityToday ? "text-orange-600 dark:text-orange-400" : "text-gray-400") : "text-gray-300"}`}
+
+            {/* Back + Play buttons */}
+            <div className="relative z-10 flex items-center justify-between mt-6 pt-5 border-t border-white/10">
+              <button
+                onClick={() => setViewMode("home")}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-bold text-white/80 hover:text-white bg-white/10 hover:bg-white/20 rounded-xl transition-all active:scale-95 backdrop-blur-sm"
               >
-                {currentStreak}
-              </span>
-              <span className="text-[8px] text-gray-500 dark:text-gray-500 font-black uppercase tracking-widest">
-                {streakData.hasActivityToday ? "Active" : "Streak"}
-              </span>
+                <ChevronLeft className="w-4 h-4" /> Back to Home
+              </button>
+              <button
+                onClick={() => navigate(selectedGame?.path)}
+                className="flex items-center gap-2 px-6 py-2.5 bg-white text-gray-900 rounded-xl text-sm font-black hover:shadow-lg transition-all active:scale-95"
+              >
+                <Play className="w-4 h-4 fill-current" style={{ color: selectedGame?.accent }} /> Play Now
+              </button>
             </div>
           </div>
 
-          {/* <div className="relative group flex-1 md:flex-none">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-primary-500 transition-colors size-4" />
-            <input 
-              type="text" 
-              placeholder="Global search..." 
-              className="pl-12 pr-6 py-2.5 bg-gray-50 dark:bg-gray-800/50 border-none rounded-2xl focus:ring-4 focus:ring-primary-500/10 outline-none w-full md:w-64 dark:text-gray-200 transition-all font-medium text-sm"
-            />
-          </div> */}
+          {/* ── Game Selector Tabs ── */}
+          <div className="flex flex-wrap gap-2 bg-white dark:bg-gray-800 p-3 rounded-2xl border border-gray-100 dark:border-gray-700 mb-6">
+            {GAMES_LIST.map(g => (
+              <button
+                key={g.type}
+                onClick={() => { setSelectedGameType(g.type); setSelectedSession(0); }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                  selectedGameType === g.type
+                    ? 'bg-gray-900 text-white shadow-md dark:bg-white dark:text-gray-900'
+                    : 'bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'
+                }`}
+              >
+                <span className="text-base">{g.icon}</span>
+                <span>{g.name}</span>
+                {selectedGameType === g.type && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                )}
+              </button>
+            ))}
+          </div>
 
-          {/* <DarkModeToggle 
-            isDarkMode={isDarkMode} 
-            setIsDarkMode={() => {}} // Controlled by context
-            collapsed={false} 
-            toggleDarkMode={toggleDarkMode}
-          />
-
-          <button className="p-2.5 rounded-2xl bg-white dark:bg-gray-900 shadow-premium border border-transparent hover:border-primary-100 transition-all text-gray-400 hover:text-primary-500">
-            <Bell size={18} />
-          </button> */}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Doctor & Data & Stats & Recent Sessions */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <InfoCard
-                title="Your Doctor"
-                content={
-                  <div className="flex justify-between">
-                    <div className="flex space-x-2 items-center">
-                      <img
-                        src="https://via.placeholder.com/40"
-                        className="w-10 h-10 rounded-full bg-black ring-2 ring-primary-100 dark:ring-primary-900"
-                        alt="Doctor"
-                      />
-                      <div>
-                        <p className="text-base font-bold text-gray-900 dark:text-gray-100">
-                          {userData?.doctor[0]?.doctorName || "Your Doctor"}
-                        </p>
-                        <p className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                          {userData?.doctor[0]?.doctorDegree || "Doctor Degree"}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="flex space-x-2">
-                      <div
-                        className="bg-primary-50 dark:bg-primary-900/20 rounded-xl flex items-center p-2 hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors cursor-pointer text-primary-500 dark:text-primary-400"
-                        onClick={() => navigate("/chat")}
-                      >
-                        <MessageSquare size={18} />
-                      </div>
-                      <a
-                        href={`tel:${userData?.doctor[0]?.doctorphone}`}
-                        className="bg-primary-50 dark:bg-primary-900/20 rounded-xl flex items-center p-2 hover:bg-primary-100 dark:hover:bg-primary-900/40 transition-colors text-primary-500 dark:text-primary-400"
-                      >
-                        <PhoneCall size={18} />
-                      </a>
-                    </div>
-                  </div>
-                }
-                onChange={() => setIsDoctorModalOpen(true)}
-              />
-              <InfoCard
-                title="Your data"
-                content={
-                  <div className="flex justify-between text-sm">
-                    <div className="text-center">
-                      <p className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                        Weight:
-                      </p>
-                      <p className="text-base font-bold text-gray-900 dark:text-gray-100">
-                        {userData?.patientDetails.weight || "NA"} kg
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                        Height:
-                      </p>
-                      <p className="text-base font-bold text-gray-900 dark:text-gray-100">
-                        {userData?.patientDetails.height || "NA"} cm
-                      </p>
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm font-normal text-gray-500 dark:text-gray-400">
-                        Blood:
-                      </p>
-                      <p className="text-base font-bold text-gray-900 dark:text-gray-100">
-                        {userData?.patientDetails.blood?.toUpperCase() || "NA"}
-                      </p>
-                    </div>
-                  </div>
-                }
-                onChange={() => navigate("/patient/setting")}
-              />
-            </div>
-
-            {/* Streak Balls - Added at the top, just the balls, no text */}
-            {/* <div className="w-full flex justify-center py-4">
-              <div className="flex space-x-0.5">
-                {streakData.map((day, index) => {
-                  let bgColor;
-                  if (day.attempts === 0) {
-                    bgColor = '#EF4444'; // red for no game played
-                  } else {
-                    const intensity = Math.min(day.attempts / 30, 1);
-                    const lightness = 80 - intensity * 60; // light green (80%) to dark green (20%)
-                    bgColor = `hsl(152, 69%, ${lightness}%)`;
-                  }
-                  return (
-                    <div
-                      key={index}
-                      className="w-4 h-4 rounded-full transition-colors"
-                      style={{ backgroundColor: bgColor }}
-                      title={`${day.date}: ${day.attempts} attempts`}
-                    />
-                  );
-                })}
-              </div>
-            </div> */}
-
-            {/* Middle Section - Stats Cards */}
-            <div className="premium-card p-6">
-              <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-6 flex items-center gap-2">
-                <TrendingUp className="w-5 h-5 text-primary-500" />
-                Performance Overview
-              </h2>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-primary-50/50 dark:bg-primary-900/10 rounded-2xl p-5 border border-primary-50 dark:border-primary-900/20">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider">
-                      Level
-                    </p>
-                    <Award className="w-4 h-4 text-primary-500" />
-                  </div>
-                  <p className="text-3xl font-black text-primary-900 dark:text-primary-100">
-                    {stats?.level || 1}
-                  </p>
-                </div>
-
-                <div className="bg-secondary-50/50 dark:bg-secondary-900/10 rounded-2xl p-5 border border-secondary-50 dark:border-secondary-900/20">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-bold text-secondary-600 dark:text-secondary-400 uppercase tracking-wider">
-                      Total Score
-                    </p>
-                    <Target className="w-4 h-4 text-secondary-500" />
-                  </div>
-                  <p className="text-3xl font-black text-secondary-900 dark:text-secondary-100">
-                    {stats?.totalScore || 0}
-                  </p>
-                </div>
-
-                <div className="bg-green-50/50 dark:bg-green-900/10 rounded-2xl p-5 border border-green-50 dark:border-green-900/20">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-bold text-green-600 dark:text-green-400 uppercase tracking-wider">
-                      Sessions
-                    </p>
-                    <Play className="w-4 h-4 text-green-500" />
-                  </div>
-                  <p className="text-3xl font-black text-green-900 dark:text-green-100">
-                    {recentSessions.length}
-                  </p>
-                </div>
-
-                <div className="bg-orange-50/50 dark:bg-orange-900/10 rounded-2xl p-5 border border-orange-50 dark:border-orange-900/20">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-wider">
-                      Response
-                    </p>
-                    <Clock className="w-4 h-4 text-orange-500" />
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    <p className="text-3xl font-black text-orange-900 dark:text-orange-100">
-                      {stats?.currentlevelspan || stats?.levelspan || 5}
-                    </p>
-                    <span className="text-xs font-bold text-orange-600 dark:text-orange-400">
-                      s
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Recent Sessions - Charts */}
+          {/* ── Charts & Visualizations ── */}
+          {recentSessions.length > 0 ? (
             <div className="space-y-6">
-              <div className="premium-card p-6">
-                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4">
-                  Recent Sessions
-                </h2>
-                {recentSessions.length > 0 ? (
-                  <div className="space-y-6">
-                    {/* Accuracy & Response Time Line Graph for Last 7 Games with Averages */}
-                    <div className="bg-gray-50 dark:bg-gray-800/20 rounded-2xl p-6 border dark:border-gray-800">
-                      <h3 className="text-lg font-bold text-gray-700 dark:text-gray-200 mb-4 tracking-tight">
-                        Accuracy & Avg Response Time: Last 7 Games
-                      </h3>
-                      <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <LineChart
-                            data={accuracyData}
-                            margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-                          >
-                            <CartesianGrid
-                              strokeDasharray="3 3"
-                              stroke={isDarkMode ? "#374151" : "#E5E7EB"}
-                            />
-                            <XAxis
-                              dataKey="date"
-                              tick={{
-                                fill: isDarkMode ? "#9CA3AF" : "#4B5563",
-                              }}
-                            />
-                            <YAxis
-                              yAxisId="left"
-                              orientation="left"
-                              unit="%"
-                              tick={{
-                                fill: isDarkMode ? "#9CA3AF" : "#4B5563",
-                              }}
-                            />
-                            <YAxis
-                              yAxisId="right"
-                              orientation="right"
-                              unit="s"
-                              tick={{
-                                fill: isDarkMode ? "#9CA3AF" : "#4B5563",
-                              }}
-                            />
-                            <Tooltip
-                              contentStyle={{
-                                backgroundColor: isDarkMode
-                                  ? "#111827"
-                                  : "#FFFFFF",
-                                borderColor: isDarkMode ? "#374151" : "#E5E7EB",
-                                color: isDarkMode ? "#F3F4F6" : "#111827",
-                                borderRadius: "12px",
-                              }}
-                              formatter={(value, name) => {
-                                if (name === "accuracy")
-                                  return [`${value}%`, "Accuracy"];
-                                if (name === "responseTime")
-                                  return [`${value}s`, "Avg Response Time"];
-                                return [value, name];
-                              }}
-                            />
-                            <Legend />
-                            <Line
-                              type="monotone"
-                              dataKey="accuracy"
-                              stroke="#3B82F6"
-                              yAxisId="left"
-                              strokeWidth={3}
-                              dot={{ r: 4, fill: "#3B82F6" }}
-                              activeDot={{ r: 6 }}
-                            />
-                            <Line
-                              type="monotone"
-                              dataKey="responseTime"
-                              stroke="#EC4899"
-                              yAxisId="right"
-                              strokeWidth={3}
-                              dot={{ r: 4, fill: "#EC4899" }}
-                              activeDot={{ r: 6 }}
-                            />
-                            <ReferenceLine
-                              y={avgAcc7Sessions}
-                              label={{
-                                value: `${avgAcc7Sessions.toFixed(1)}%`,
-                                position: "middle",
-                                fill: "#3B82F6",
-                                fontWeight: "bold",
-                                fontSize: 10,
-                              }}
-                              stroke="#3B82F6"
-                              strokeDasharray="5 5"
-                              yAxisId="left"
-                            />
-                            <ReferenceLine
-                              y={avgResponseTime7Games}
-                              label={{
-                                value: `${avgResponseTime7Games.toFixed(1)}s`,
-                                position: "top",
-                                fill: "#EC4899",
-                                fontWeight: "bold",
-                                fontSize: 10,
-                              }}
-                              stroke="#EC4899"
-                              strokeDasharray="5 5"
-                              yAxisId="right"
-                            />
-                          </LineChart>
-                        </ResponsiveContainer>
-                      </div>
+
+              {/* Accuracy & Response Time */}
+              <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
+                <div className="flex items-center justify-between mb-5">
+                  <div>
+                    <h3 className="text-base font-bold text-gray-800 dark:text-white">Accuracy &amp; Response Time</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">Last 7 sessions overview</p>
+                  </div>
+                  <div className="flex gap-3 text-xs">
+                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500"></span><span className="text-gray-500 dark:text-gray-400 font-medium">Accuracy</span></span>
+                    <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-pink-500"></span><span className="text-gray-500 dark:text-gray-400 font-medium">Response</span></span>
+                  </div>
+                </div>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={accuracyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#1F2937" : "#F3F4F6"} />
+                      <XAxis dataKey="date" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="left" orientation="left" unit="%" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <YAxis yAxisId="right" orientation="right" unit="s" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ backgroundColor: isDarkMode ? "#111827" : "#FFFFFF", borderColor: isDarkMode ? "#374151" : "#E5E7EB", color: isDarkMode ? "#F3F4F6" : "#111827", borderRadius: "16px", boxShadow: "0 10px 30px rgba(0,0,0,0.15)" }} formatter={(value, name) => { if (name === "accuracy") return [`${value.toFixed(1)}%`, "Accuracy"]; if (name === "responseTime") return [`${value.toFixed(2)}s`, "Avg Response"]; return [value, name]; }} />
+                      <Line type="monotone" dataKey="accuracy" stroke="#3B82F6" yAxisId="left" strokeWidth={3} dot={{ r: 5, fill: "#3B82F6", strokeWidth: 2, stroke: "#fff" }} activeDot={{ r: 7 }} />
+                      <Line type="monotone" dataKey="responseTime" stroke="#EC4899" yAxisId="right" strokeWidth={3} dot={{ r: 5, fill: "#EC4899", strokeWidth: 2, stroke: "#fff" }} activeDot={{ r: 7 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Performance + Daily Progress side by side */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
+                  <div className="flex items-center gap-2 mb-5">
+                    <div className="w-8 h-8 bg-primary-50 dark:bg-primary-900/20 rounded-xl flex items-center justify-center">
+                      <Activity className="w-4 h-4 text-primary-500" />
                     </div>
-
-                    {/* Grid for Counts Line Graphs */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-                      {/* Last 7 Games Counts */}
-                      <div className="bg-primary-50/20 dark:bg-primary-900/10 rounded-2xl p-6 border border-primary-50/50 dark:border-primary-900/20">
-                        <h3 className="text-base font-bold text-gray-700 dark:text-gray-200 mb-6 flex items-center gap-2 tracking-tight">
-                          <Activity className="w-4 h-4 text-primary-500" />
-                          Performance Metrics
-                        </h3>
-                        <div className="h-64">
-                          {isMounted && (
-                            <ResponsiveContainer width="100%" height="100%">
-                              <LineChart
-                                data={last7Data}
-                                margin={{
-                                  top: 10,
-                                  right: 10,
-                                  left: -20,
-                                  bottom: 0,
-                                }}
-                              >
-                                <CartesianGrid
-                                  strokeDasharray="3 3"
-                                  vertical={false}
-                                  stroke={isDarkMode ? "#374151" : "#E2E8F0"}
-                                />
-                                <XAxis
-                                  dataKey="date"
-                                  axisLine={false}
-                                  tickLine={false}
-                                  tick={{
-                                    fontSize: 10,
-                                    fill: isDarkMode ? "#9CA3AF" : "#94A3B8",
-                                  }}
-                                />
-                                <YAxis
-                                  axisLine={false}
-                                  tickLine={false}
-                                  tick={{
-                                    fontSize: 10,
-                                    fill: isDarkMode ? "#9CA3AF" : "#94A3B8",
-                                  }}
-                                />
-                                <Tooltip
-                                  contentStyle={{
-                                    borderRadius: "12px",
-                                    border: "none",
-                                    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                                    backgroundColor: isDarkMode
-                                      ? "#111827"
-                                      : "#FFFFFF",
-                                    color: isDarkMode ? "#F3F4F6" : "#111827",
-                                  }}
-                                />
-                                <Legend iconType="circle" />
-                                <Line
-                                  type="monotone"
-                                  dataKey="correct"
-                                  stroke="#10B981"
-                                  strokeWidth={3}
-                                  dot={{ r: 3, fill: "#10B981" }}
-                                />
-                                <Line
-                                  type="monotone"
-                                  dataKey="incorrect"
-                                  stroke="#EF4444"
-                                  strokeWidth={3}
-                                  dot={{ r: 3, fill: "#EF4444" }}
-                                />
-                                <Line
-                                  type="monotone"
-                                  dataKey="notDone"
-                                  stroke="#F59E0B"
-                                  strokeWidth={3}
-                                  dot={{ r: 3, fill: "#F59E0B" }}
-                                />
-                              </LineChart>
-                            </ResponsiveContainer>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Daily Counts Last 7 Days */}
-                      <div className="bg-secondary-50/20 dark:bg-secondary-900/10 rounded-2xl p-6 border border-secondary-50/50 dark:border-secondary-900/20">
-                        <h3 className="text-base font-bold text-gray-700 dark:text-gray-200 mb-6 flex items-center gap-2 tracking-tight">
-                          <TrendingUp className="w-4 h-4 text-secondary-500" />
-                          Daily Progress
-                        </h3>
-                        <div className="h-64">
-                          {isMounted && (
-                            <ResponsiveContainer width="100%" height="100%">
-                              <LineChart
-                                data={dailyTotalsData}
-                                margin={{
-                                  top: 10,
-                                  right: 10,
-                                  left: -20,
-                                  bottom: 0,
-                                }}
-                              >
-                                <CartesianGrid
-                                  strokeDasharray="3 3"
-                                  vertical={false}
-                                  stroke={isDarkMode ? "#374151" : "#E2E8F0"}
-                                />
-                                <XAxis
-                                  dataKey="date"
-                                  axisLine={false}
-                                  tickLine={false}
-                                  tick={{
-                                    fontSize: 10,
-                                    fill: isDarkMode ? "#9CA3AF" : "#94A3B8",
-                                  }}
-                                />
-                                <YAxis
-                                  axisLine={false}
-                                  tickLine={false}
-                                  tick={{
-                                    fontSize: 10,
-                                    fill: isDarkMode ? "#9CA3AF" : "#94A3B8",
-                                  }}
-                                />
-                                <Tooltip
-                                  contentStyle={{
-                                    borderRadius: "12px",
-                                    border: "none",
-                                    boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                                    backgroundColor: isDarkMode
-                                      ? "#111827"
-                                      : "#FFFFFF",
-                                    color: isDarkMode ? "#F3F4F6" : "#111827",
-                                  }}
-                                />
-                                <Legend iconType="circle" />
-                                <Line
-                                  type="monotone"
-                                  dataKey="correct"
-                                  stroke="#10B981"
-                                  strokeWidth={3}
-                                  dot={{ r: 3, fill: "#10B981" }}
-                                />
-                                <Line
-                                  type="monotone"
-                                  dataKey="incorrect"
-                                  stroke="#EF4444"
-                                  strokeWidth={3}
-                                  dot={{ r: 3, fill: "#EF4444" }}
-                                />
-                                <Line
-                                  type="monotone"
-                                  dataKey="notDone"
-                                  stroke="#F59E0B"
-                                  strokeWidth={3}
-                                  dot={{ r: 3, fill: "#F59E0B" }}
-                                />
-                              </LineChart>
-                            </ResponsiveContainer>
-                          )}
-                        </div>
-                      </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-800 dark:text-white leading-none">Performance Breakdown</h3>
+                      <p className="text-[11px] text-gray-400">Correct / Incorrect / Skipped</p>
                     </div>
+                  </div>
+                  <div className="h-52">
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={last7Data} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? "#1F2937" : "#F3F4F6"} />
+                          <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? "#9CA3AF" : "#94A3B8" }} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? "#9CA3AF" : "#94A3B8" }} />
+                          <Tooltip contentStyle={{ borderRadius: "14px", border: "none", boxShadow: "0 8px 20px rgba(0,0,0,0.12)", backgroundColor: isDarkMode ? "#111827" : "#FFFFFF", color: isDarkMode ? "#F3F4F6" : "#111827" }} />
+                          <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                          <Line type="monotone" dataKey="correct" stroke="#10B981" strokeWidth={2.5} dot={{ r: 3, fill: "#10B981" }} name="Correct" />
+                          <Line type="monotone" dataKey="incorrect" stroke="#EF4444" strokeWidth={2.5} dot={{ r: 3, fill: "#EF4444" }} name="Incorrect" />
+                          <Line type="monotone" dataKey="notDone" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3, fill: "#F59E0B" }} name="Skipped" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </div>
 
-                    {/* Detailed Last Game Plot */}
-                    <div className="bg-gray-50 dark:bg-gray-800/20 rounded-2xl p-6 border dark:border-gray-800">
-                      <div className="flex items-center justify-between mb-4">
-                        <h3 className="text-lg font-bold text-gray-700 dark:text-gray-200 tracking-tight">
-                          Detailed Plot: Last Game Performance
-                        </h3>
-                        <select
-                          className="p-2 border dark:border-gray-700 rounded-lg text-sm bg-white dark:bg-gray-800 dark:text-gray-200 outline-none focus:ring-2 focus:ring-primary-500/50"
-                          value={selectedSession}
-                          onChange={(e) =>
-                            setSelectedSession(parseInt(e.target.value))
-                          }
-                        >
-                          {last7ChronDesc.map((s, i) => (
-                            <option key={i} value={i}>
-                              Game {i + 1} (
-                              {new Date(s.time).toLocaleDateString()})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      {attemptData.length > 0 ? (
-                        <div className="h-64">
-                          {isMounted && (
-                            <ResponsiveContainer width="100%" height="100%">
-                              <LineChart
-                                data={attemptData}
-                                margin={{
-                                  top: 20,
-                                  right: 30,
-                                  left: 20,
-                                  bottom: 5,
-                                }}
-                              >
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="attempt" />
-                                <YAxis unit="s" />
-                                <Tooltip content={customTooltip} />
-                                <Line
-                                  type="monotone"
-                                  dataKey="responseTime"
-                                  stroke="#82ca9d"
-                                  strokeWidth={2}
-                                  dot={renderDot}
-                                />
-                              </LineChart>
-                            </ResponsiveContainer>
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-gray-500 text-center">
-                          No detailed play data available for this session.
-                        </p>
-                      )}
+                <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
+                  <div className="flex items-center gap-2 mb-5">
+                    <div className="w-8 h-8 bg-secondary-50 dark:bg-secondary-900/20 rounded-xl flex items-center justify-center">
+                      <TrendingUp className="w-4 h-4 text-secondary-500" />
                     </div>
-
-                    <div className="mt-8 p-6 bg-primary-50/50 dark:bg-primary-900/10 rounded-2xl border border-primary-100 dark:border-primary-900/20 flex items-start gap-4">
-                      <div className="bg-white dark:bg-gray-800 p-2.5 rounded-xl shadow-sm">
-                        <AlertCircle className="w-6 h-6 text-primary-500" />
-                      </div>
-                      <div>
-                        <p className="text-sm text-primary-900 dark:text-primary-100 font-bold mb-1">
-                          💡 Pro Tip for Better Results
-                        </p>
-                        <p className="text-sm text-primary-700 dark:text-primary-300 leading-relaxed font-medium">
-                          Consistency is key! Try to maintain your streak by
-                          completing at least one session daily. Aim for a
-                          response time under{" "}
-                          <span className="font-bold text-primary-900 dark:text-primary-100">
-                            {stats?.currentlevelspan || stats?.levelspan || 5}s
-                          </span>{" "}
-                          to maximize your score.
-                        </p>
-                      </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-800 dark:text-white leading-none">Daily Progress</h3>
+                      <p className="text-[11px] text-gray-400">Totals by day (last 7 days)</p>
                     </div>
+                  </div>
+                  <div className="h-52">
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={dailyTotalsData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? "#1F2937" : "#F3F4F6"} />
+                          <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? "#9CA3AF" : "#94A3B8" }} />
+                          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? "#9CA3AF" : "#94A3B8" }} />
+                          <Tooltip contentStyle={{ borderRadius: "14px", border: "none", boxShadow: "0 8px 20px rgba(0,0,0,0.12)", backgroundColor: isDarkMode ? "#111827" : "#FFFFFF", color: isDarkMode ? "#F3F4F6" : "#111827" }} />
+                          <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+                          <Line type="monotone" dataKey="correct" stroke="#10B981" strokeWidth={2.5} dot={{ r: 3, fill: "#10B981" }} name="Correct" />
+                          <Line type="monotone" dataKey="incorrect" stroke="#EF4444" strokeWidth={2.5} dot={{ r: 3, fill: "#EF4444" }} name="Incorrect" />
+                          <Line type="monotone" dataKey="notDone" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3, fill: "#F59E0B" }} name="Skipped" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                </div>
+              </div>
 
-                    <CoordinateVisualizer coordinates={recentSessions[selectedSession]?.session?.coordinates || recentSessions[selectedSession]?.coordinates} />
+              {/* Session Play-by-Play */}
+              <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+                  <div>
+                    <h3 className="text-base font-bold text-gray-800 dark:text-white">Session Replay</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">Response time per attempt</p>
+                  </div>
+                  {/* Session selector pills */}
+                  <div className="flex flex-wrap gap-2">
+                    {last7ChronDesc.map((s, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setSelectedSession(i)}
+                        className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${
+                          selectedSession === i
+                            ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 shadow-md'
+                            : 'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600'
+                        }`}
+                      >
+                        S{i + 1} · {new Date(s.time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Selected session info strip */}
+                {last7ChronDesc[selectedSession] && (
+                  <div className="flex flex-wrap items-center gap-3 mb-4 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
+                    <div className="text-[11px] text-gray-400 font-medium">
+                      {new Date(last7ChronDesc[selectedSession].time).toLocaleString()}
+                    </div>
+                    <div className="flex gap-2 ml-auto">
+                      <span className="px-2 py-0.5 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-[10px] font-black rounded-full">
+                        ✓ {last7ChronDesc[selectedSession].correct} correct
+                      </span>
+                      <span className="px-2 py-0.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-[10px] font-black rounded-full">
+                        ✗ {last7ChronDesc[selectedSession].incorrect} wrong
+                      </span>
+                      <span className="px-2 py-0.5 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 text-[10px] font-black rounded-full">
+                        ⭐ {last7ChronDesc[selectedSession].sessionScore || 0} pts
+                      </span>
+                    </div>
+                  </div>
+                )}
+                {attemptData.length > 0 ? (
+                  <div className="h-52">
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={attemptData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? "#1F2937" : "#F3F4F6"} />
+                          <XAxis dataKey="attempt" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? "#9CA3AF" : "#94A3B8" }} />
+                          <YAxis unit="s" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? "#9CA3AF" : "#94A3B8" }} />
+                          <Tooltip content={customTooltip} />
+                          <Line type="monotone" dataKey="responseTime" stroke={selectedGame?.accent || "#6366F1"} strokeWidth={2.5} dot={renderDot} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
                   </div>
                 ) : (
-                  <div className="text-center py-16">
-                    <div className="mb-6">
-                      <Play className="w-24 h-24 text-gray-300 mx-auto" />
-                    </div>
-                    <p className="text-xl text-gray-400 mb-4 font-semibold">
-                      No sessions yet!
-                    </p>
-                    <p className="text-gray-500 mb-6">
-                      Start playing to see your progress and statistics
-                    </p>
-                    <button
-                      onClick={() => navigate("/piano-reaction")}
-                      className="inline-flex items-center gap-2 px-8 py-4 bg-gradient-to-r from-primary-500 to-secondary-500 text-white rounded-lg hover:from-primary-600 hover:to-secondary-600 transition shadow-lg font-semibold text-lg"
-                    >
-                      <Play className="w-6 h-6" />
-                      Play Your First Game
-                    </button>
+                  <div className="text-center py-10">
+                    <p className="text-4xl mb-2">📭</p>
+                    <p className="text-gray-400 font-medium text-sm">No per-attempt telemetry for this session.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Hand Movement Trajectory */}
+              {selectedGame?.hasCoordinates && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-1 h-6 rounded-full" style={{ backgroundColor: selectedGame.accent }}></div>
+                    <h3 className="text-base font-bold text-gray-800 dark:text-white">Hand Movement Trajectory</h3>
+                    <span className="text-xs text-gray-400 font-medium">— Session {selectedSession + 1}</span>
+                  </div>
+                  <CoordinateVisualizer coordinates={selectedCoordinates} />
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-24 bg-white dark:bg-gray-800 rounded-3xl border border-gray-100 dark:border-gray-700">
+              <div className="text-7xl mb-4">{selectedGame?.icon}</div>
+              <p className="text-xl font-bold text-gray-400 mb-2">No sessions recorded yet</p>
+              <p className="text-gray-500 mb-8 max-w-sm mx-auto">Play {selectedGame?.name} to start tracking your therapy progress and see your stats here.</p>
+              <button
+                onClick={() => navigate(selectedGame?.path)}
+                className="inline-flex items-center gap-2 px-8 py-3.5 rounded-2xl text-white font-black hover:shadow-lg transition-all active:scale-95 text-sm"
+                style={{ background: `linear-gradient(135deg, ${selectedGame?.accent}, ${selectedGame?.accent}cc)` }}
+              >
+                <Play className="w-5 h-5 fill-current" /> Play Now
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ═══════════════════════════════════════
+           HOME VIEW
+           ═══════════════════════════════════════ */
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+          {/* ── Main Content (2 cols) ── */}
+          <div className="lg:col-span-2 space-y-6">
+
+            {/* Greeting Row */}
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-black text-gray-900 dark:text-white">
+                  Hello, {userData?.name?.split(' ')[0] || 'there'}! 👋
+                </h1>
+                <p className="text-gray-500 dark:text-gray-400 mt-1 font-medium">You're doing great! Let's keep it up.</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5 px-4 py-2.5 bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-800/30 rounded-2xl">
+                  <span className="text-2xl">🔥</span>
+                  <div>
+                    <p className="text-xl font-black text-orange-600 dark:text-orange-400 leading-none">{currentStreak}</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-orange-400">Day Streak</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2.5 px-4 py-2.5 bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800/30 rounded-2xl">
+                  <span className="text-2xl">⭐</span>
+                  <div>
+                    <p className="text-xl font-black text-green-600 dark:text-green-400 leading-none">{stats?.totalScore || 0}</p>
+                    <p className="text-[9px] font-black uppercase tracking-widest text-green-400">Points</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Summary Cards Row */}
+            <div className="grid grid-cols-3 gap-4">
+              {/* Daily Goal */}
+              <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+                <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-3">Daily Goal</p>
+                <p className="text-4xl font-black text-gray-900 dark:text-white">
+                  {todaySessionsCount} <span className="text-xl text-gray-300 dark:text-gray-600">/ 3</span>
+                </p>
+                <p className="text-[11px] text-gray-400 mt-1 mb-3">Exercises Completed</p>
+                <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+                  <div
+                    className="bg-gradient-to-r from-primary-500 to-primary-400 h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min((todaySessionsCount / 3) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Keep Going */}
+              <div className="bg-gradient-to-br from-amber-400 to-orange-500 rounded-3xl p-5 text-white shadow-md shadow-orange-200 dark:shadow-orange-900/20 relative overflow-hidden flex flex-col justify-between">
+                <div className="absolute -right-3 -bottom-3 text-7xl opacity-15 select-none">🏆</div>
+                <p className="text-sm font-bold">Keep Going!</p>
+                <span className="text-4xl">🏆</span>
+                <p className="text-xs font-semibold opacity-90 leading-snug">You're making excellent progress.</p>
+              </div>
+
+              {/* This Week */}
+              <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+                <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">This Week</p>
+                <p className="text-4xl font-black text-green-500">{weekAccuracyAllGames.toFixed(0)}%</p>
+                <p className="text-[11px] text-gray-400 mt-1 mb-2">Overall Score</p>
+                {isMounted && (
+                  <div className="h-10">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={weekSparklineData}>
+                        <Line type="monotone" dataKey="acc" stroke="#10B981" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
                   </div>
                 )}
               </div>
             </div>
-          </div>
-        </div>
 
-        {/* Reminders & Play Button & Total Counts Bar */}
-        <div className="lg:col-span-1 space-y-4">
-          <div className="premium-card p-5 mb-4">
-            <div className="flex justify-between items-center mb-3">
-              <p className="font-bold dark:text-white uppercase tracking-wider text-xs">
-                Remind me
-              </p>
-              <div className="flex items-center gap-1">
+            {/* Choose Your Game */}
+            <div className="premium-card p-6">
+              <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-5 flex items-center gap-2">
+                <Activity className="w-5 h-5 text-primary-500" />
+                Choose Your Game
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {GAMES_LIST.map((game) => {
+                  const gameStats = stats?.games?.find(g => g.type === game.type);
+                  const sessions = gameStats?.recentSessions || [];
+                  const playCount = sessions.length;
+                  const highScore = playCount > 0 ? Math.max(...sessions.map(s => s.sessionScore || 0), 0) : 0;
+                  const themes = {
+                    type1:        'from-violet-700 to-indigo-800',
+                    board_drawing: 'from-blue-700 to-cyan-800',
+                    shape_tracing: 'from-teal-600 to-emerald-800',
+                    fruit_basket:  'from-orange-600 to-amber-700',
+                    in_cam_game:   'from-slate-600 to-gray-800',
+                  };
+                  const grad = themes[game.type] || 'from-gray-700 to-gray-800';
+                  return (
+                    <div
+                      key={game.type}
+                      className="bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 hover:border-primary-500/50 transition-all hover:shadow-xl hover:shadow-primary-500/10 hover:-translate-y-0.5 group"
+                    >
+                      {/* Visual Header */}
+                      <div className={`bg-gradient-to-br ${grad} h-28 flex flex-col items-center justify-center relative`}>
+                        <span className="text-5xl group-hover:scale-110 transition-transform duration-300 drop-shadow-lg">{game.icon}</span>
+                        {playCount > 0 && (
+                          <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-sm text-white text-[9px] font-black px-2 py-0.5 rounded-full">
+                            {playCount}×
+                          </div>
+                        )}
+                        {highScore > 0 && (
+                          <div className="absolute bottom-2 left-2 bg-black/40 backdrop-blur-sm text-yellow-300 text-[9px] font-black px-2 py-0.5 rounded-full">
+                            ⭐ {highScore}
+                          </div>
+                        )}
+                      </div>
+                      {/* Card Body */}
+                      <div className="p-4">
+                        <h3 className="font-extrabold text-sm text-white mb-1 group-hover:text-primary-400 transition-colors">{game.name}</h3>
+                        <p className="text-[11px] text-gray-400 leading-relaxed line-clamp-2 mb-4">{game.desc}</p>
+                        <div className="space-y-2">
+                          <button
+                            onClick={() => navigate(game.path)}
+                            className="w-full py-2.5 bg-green-500 hover:bg-green-400 text-gray-900 font-black text-sm rounded-xl transition-all active:scale-95"
+                          >
+                            ▶ Play
+                          </button>
+                          <button
+                            onClick={() => { setSelectedGameType(game.type); setViewMode("details"); setSelectedSession(0); }}
+                            className="w-full py-1.5 text-xs font-bold text-gray-500 hover:text-white transition-colors"
+                          >
+                            View Stats →
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Right Sidebar ── */}
+          <div className="space-y-4">
+            {/* Performance Overview */}
+            <div className="premium-card p-5">
+              <h3 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">Performance</h3>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-primary-50/50 dark:bg-primary-900/10 rounded-2xl p-3 border border-primary-50 dark:border-primary-900/20">
+                  <p className="text-[10px] font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider mb-1">Level</p>
+                  <p className="text-2xl font-black text-primary-900 dark:text-primary-100">{stats?.level || 1}</p>
+                </div>
+                <div className="bg-secondary-50/50 dark:bg-secondary-900/10 rounded-2xl p-3 border border-secondary-50 dark:border-secondary-900/20">
+                  <p className="text-[10px] font-bold text-secondary-600 dark:text-secondary-400 uppercase tracking-wider mb-1">Score</p>
+                  <p className="text-2xl font-black text-secondary-900 dark:text-secondary-100">{stats?.totalScore || 0}</p>
+                </div>
+                <div className="bg-green-50/50 dark:bg-green-900/10 rounded-2xl p-3 border border-green-50 dark:border-green-900/20 col-span-2">
+                  <p className="text-[10px] font-bold text-green-600 dark:text-green-400 uppercase tracking-wider mb-1">Total Sessions (All Games)</p>
+                  <p className="text-2xl font-black text-green-900 dark:text-green-100">{totalSessionsAllGames}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Your Doctor */}
+            <div className="premium-card p-5">
+              <h3 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">Care Team</h3>
+              <div className="flex items-center gap-3 mb-4">
+                <img
+                  src="https://via.placeholder.com/40"
+                  className="w-12 h-12 rounded-full ring-2 ring-primary-100 dark:ring-primary-900"
+                  alt="Doctor"
+                />
+                <div>
+                  <p className="text-sm font-bold text-gray-900 dark:text-white">{userData?.doctor?.[0]?.doctorName || "Your Doctor"}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{userData?.doctor?.[0]?.doctorDegree || "Physician"}</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => navigate("/chat")}
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary-500 hover:bg-primary-600 text-white font-bold text-sm rounded-xl transition-all"
+                >
+                  <MessageSquare size={14} /> Message
+                </button>
+                <a
+                  href={`tel:${userData?.doctor?.[0]?.doctorphone}`}
+                  className="flex items-center justify-center p-2.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-xl transition-all hover:bg-gray-200 dark:hover:bg-gray-600"
+                >
+                  <PhoneCall size={16} />
+                </a>
+              </div>
+            </div>
+
+            {/* Next Reminder */}
+            <div className="premium-card p-5">
+              <h3 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">Next Reminder</h3>
+              {activeReminders.length > 0 ? (
+                <div>
+                  <div className="flex items-center gap-3 mb-4 p-3 bg-primary-50 dark:bg-primary-900/20 rounded-2xl">
+                    <div className="bg-white dark:bg-gray-800 rounded-xl p-2.5 shadow-sm">
+                      <Clock size={18} className="text-primary-500" />
+                    </div>
+                    <div>
+                      <p className="text-base font-black text-gray-900 dark:text-white">{activeReminders[0].time}</p>
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{activeReminders[0].title}</p>
+                    </div>
+                  </div>
+                  <button
+                    className="w-full py-2.5 bg-primary-500 hover:bg-primary-600 text-white font-bold text-sm rounded-xl transition-all active:scale-95"
+                    onClick={() => handleMarkDone(activeReminders[0]._id)}
+                  >
+                    Got It ✓
+                  </button>
+                  {activeReminders.length > 1 && (
+                    <p className="text-center text-xs text-gray-400 mt-2">
+                      +{activeReminders.length - 1} more reminder{activeReminders.length > 2 ? 's' : ''}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-4">
+                  <p className="text-3xl mb-2">✅</p>
+                  <p className="text-sm text-gray-400 font-medium">All done for today!</p>
+                </div>
+              )}
+            </div>
+
+            {/* All Reminders */}
+            <div className="premium-card p-5">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Remind Me</h3>
                 <select
-                  className="text-sm text-[#6FD2EE] bg-transparent border-none focus:outline-none cursor-pointer font-bold"
+                  className="text-sm text-primary-500 bg-transparent border-none focus:outline-none cursor-pointer font-bold"
                   value={selectedPeriod}
                   onChange={(e) => setSelectedPeriod(e.target.value)}
                 >
                   <option value="today">Today</option>
-                  <option value="week">This week</option>
-                  <option value="month">This month</option>
+                  <option value="week">This Week</option>
+                  <option value="month">This Month</option>
                 </select>
               </div>
-            </div>
-            <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2 mb-4">
-              <div
-                className="bg-gradient-to-r from-primary-500 to-primary-600 h-2 rounded-full transition-all duration-300 shadow-sm shadow-primary-200 dark:shadow-none"
-                style={{ width: `${percentage}%` }}
-              ></div>
-            </div>
-
-            <div className="space-y-1 rounded-2xl bg-gray-50 dark:bg-gray-800/40 p-1.5 max-h-48 overflow-y-auto border border-transparent dark:border-gray-800/50">
-              {activeReminders.map((r) => (
-                <ReminderItem
-                  key={r._id}
-                  reminder={r}
-                  onEdit={() => setEditingReminder(r)}
-                  onMarkDone={handleMarkDone}
+              <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5 mb-3">
+                <div
+                  className="bg-gradient-to-r from-primary-500 to-primary-400 h-1.5 rounded-full transition-all"
+                  style={{ width: `${percentage}%` }}
                 />
-              ))}
-              {completedReminders.length > 0 && (
-                <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2 px-2">
-                    Completed
-                  </p>
-                  {completedReminders.map((r) => (
-                    <ReminderItem
-                      key={r._id}
-                      reminder={r}
-                      onEdit={() => setEditingReminder(r)}
-                      isCompleted
-                    />
-                  ))}
-                </div>
-              )}
-              {activeReminders.length === 0 &&
-                completedReminders.length === 0 && (
-                  <p className="text-xs text-gray-400 text-center py-4 font-medium italic">
-                    No reminders scheduled
-                  </p>
+              </div>
+              <div className="space-y-1 max-h-44 overflow-y-auto">
+                {activeReminders.map(r => (
+                  <ReminderItem key={r._id} reminder={r} onEdit={() => setEditingReminder(r)} onMarkDone={handleMarkDone} />
+                ))}
+                {completedReminders.length > 0 && (
+                  <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2 px-2">Completed</p>
+                    {completedReminders.map(r => (
+                      <ReminderItem key={r._id} reminder={r} onEdit={() => setEditingReminder(r)} isCompleted />
+                    ))}
+                  </div>
                 )}
-            </div>
-          </div>
-
-          <button
-            onClick={() => navigate("/board-drawing")}
-            className="w-full flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-2xl font-bold text-lg hover:shadow-xl hover:shadow-primary-200 dark:hover:shadow-none transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-          // className="w-full flex items-center justify-center gap-3 p-4 bg-white dark:bg-gray-900 border-2 border-primary-50 dark:border-gray-800 text-gray-700 dark:text-gray-200 rounded-2xl font-bold text-lg hover:border-primary-100 dark:hover:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-          >
-            <Play className="w-5 h-5 fill-current" />
-            Board Drawing
-          </button>
-
-          <button
-            onClick={() => navigate("/fruit-basket")}
-            className="w-full flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-2xl font-bold text-lg hover:shadow-xl hover:shadow-primary-200 dark:hover:shadow-none transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-          // className="w-full flex items-center justify-center gap-3 p-4 bg-white dark:bg-gray-900 border-2 border-primary-50 dark:border-gray-800 text-gray-700 dark:text-gray-200 rounded-2xl font-bold text-lg hover:border-primary-100 dark:hover:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-          >
-            <Play className="w-5 h-5 fill-current" />
-            Arm – Fruit Fetch
-          </button>
-
-          <button
-            onClick={() => navigate("/piano-reaction")}
-            className="w-full flex items-center justify-center gap-3 p-4 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-2xl font-bold text-lg hover:shadow-xl hover:shadow-primary-200 dark:hover:shadow-none transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-          // className="w-full flex items-center justify-center gap-3 p-4 bg-white dark:bg-gray-900 border-2 border-primary-50 dark:border-gray-800 text-gray-700 dark:text-gray-200 rounded-2xl font-bold text-lg hover:border-primary-100 dark:hover:border-primary-800 hover:bg-primary-50 dark:hover:bg-primary-900/10 transition-all transform hover:-translate-y-0.5 active:translate-y-0"
-          >
-            <Play className="w-5 h-5 fill-current" />
-            Piano Reaction Game
-          </button>
-
-          {/* Total Counts Bar Chart - UPDATED with colors */}
-          <div className="premium-card p-6 mb-4">
-            <h3 className="text-base font-bold text-gray-700 dark:text-gray-200 mb-6 flex items-center gap-2 justify-center tracking-tight">
-              <Award className="w-4 h-4 text-primary-500" />
-              Total Achievements
-            </h3>
-            <div className="h-64 flex items-center justify-center">
-              {isMounted && (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={barData}
-                    margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-                  >
-                    <XAxis
-                      dataKey="name"
-                      tick={{
-                        fontSize: 10,
-                        fill: isDarkMode ? "#9CA3AF" : "#94A3B8",
-                      }}
-                    />
-                    <YAxis hide={true} />
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: "12px",
-                        border: "none",
-                        boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                        backgroundColor: isDarkMode ? "#111827" : "#FFFFFF",
-                        color: isDarkMode ? "#F3F4F6" : "#111827",
-                      }}
-                      formatter={(value) => [value, "Count"]}
-                    />
-                    <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                      {barData.map((entry, index) => {
-                        let color = isDarkMode ? "#374151" : "#E2E8F0"; // fallback
-                        if (entry.name === "Correct") color = "#10B981";
-                        else if (entry.name === "Incorrect") color = "#EF4444";
-                        return <Cell key={`cell-${index}`} fill={color} />;
-                      })}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
+                {filteredReminders.length === 0 && (
+                  <p className="text-xs text-gray-400 text-center py-4 italic">No reminders scheduled</p>
+                )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Edit Reminder Modal */}
       {editingReminder && (

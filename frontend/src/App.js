@@ -25,6 +25,7 @@ import PianoReactionGame from "./pages/game/PianoReactionGame/PianoReactionGame"
 import ShapeTracingGame from "./pages/game/ShapeTracingGame/ShapeTracingGame";
 import BoardDrawingGame from "./pages/game/BoardDrawingGame/BoardDrawingGame";
 import FruitBasketGame from "./pages/game/FruitBasketGame/FruitBasketGame";
+import InCamGame from "./pages/game/InCamGame/InCamGame";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import CreatePatientForm from "./components/admin/CreatePatientForm";
 import DoctorProfileForm from "./pages/doctor/DoctorProfileForm";
@@ -150,6 +151,14 @@ function App() {
             element={
               <ProtectedRoute allowedTypes={["patient", "caretaker"]}>
                 <FruitBasketGame />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/in-cam-game"
+            element={
+              <ProtectedRoute allowedTypes={["patient", "caretaker"]}>
+                <InCamGame />
               </ProtectedRoute>
             }
           />

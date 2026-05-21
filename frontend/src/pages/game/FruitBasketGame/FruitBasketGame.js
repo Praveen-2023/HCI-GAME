@@ -5,6 +5,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import gameSessionBuffer from "../../../services/gameSessionBuffer";
 import SaveExitButton from "../SaveExitButton";
+import { COORD_SAMPLE_INTERVAL_MS, MAX_COORDS_PER_SESSION } from "../../../constants";
 // ==================== CONFIGURATION ====================
 const CONFIG = {
   SESSION_SECONDS: 300,
@@ -108,6 +109,8 @@ const FruitBasketGame = () => {
   const gridHolesRef = useRef([]);
   const fruitRef = useRef(null);
   const basketIdxRef = useRef(null);
+  const coordinateLogRef = useRef([]);
+  const lastCoordTimeRef = useRef(0);
   const lastPoseResultsRef = useRef(null);
   // ==================== UTILITY FUNCTIONS ====================
   const distNorm = (a, b) => {
@@ -385,6 +388,18 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     ["Left", "Right"].forEach((label) => {
       const hand = handState[label];
       if (!hand.smoothPos || !hand.visible) return;
+      
+      // Track downsampled coordinates for relative hand trajectory visualization
+      if (sessionStartRef.current && Date.now() - lastCoordTimeRef.current > COORD_SAMPLE_INTERVAL_MS) {
+        if (coordinateLogRef.current.length < MAX_COORDS_PER_SESSION) {
+          coordinateLogRef.current.push({
+            x: hand.smoothPos.x,
+            y: hand.smoothPos.y,
+            timestamp: nowSec()
+          });
+        }
+        lastCoordTimeRef.current = Date.now();
+      }
       if (
         !fruitRef.current.attachedTo &&
         hand.closedFrames >= CONFIG.STABLE_FRAMES
@@ -810,6 +825,8 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     }, 1000);
 
     logsRef.current.push({ timestamp: 0, event: "session_start" });
+    coordinateLogRef.current = [];
+    lastCoordTimeRef.current = 0;
     // Init local session buffer
     gameSessionBuffer.init('fruit_basket', 'Arm – Fruit Fetch');
     showStatus("🎮 Session started! Close hand to grab fruit!", 3000);
@@ -836,7 +853,8 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     }));
     gameSessionBuffer.update({
       sessionScore: scoreRef.current,
-      playData
+      playData,
+      coordinates: coordinateLogRef.current.map(p => ({ ...p }))
     });
 
     alert(
@@ -889,28 +907,66 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
   useEffect(() => {
     showDebugRef.current = showDebug;
   }, [showDebug]);
-  useEffect(() => {
-    setupGrid();
-    setupMediaPipe();
+  // Mount-only refs so setup/cleanup never re-runs on state changes
+  const _setupGridRef = React.useRef(setupGrid);
+  _setupGridRef.current = setupGrid;
+  const _setupMPRef = React.useRef(setupMediaPipe);
+  _setupMPRef.current = setupMediaPipe;
+  const _mainLoopFBRef = React.useRef(mainLoop);
+  _mainLoopFBRef.current = mainLoop;
 
-    const loopId = requestAnimationFrame(mainLoop);
+  useEffect(() => {
+    _setupGridRef.current();
+    _setupMPRef.current();
+
     const handleKeyDown = (e) => {
       if (e.key === "d" || e.key === "D") {
         setShowDebug((prev) => !prev);
       }
     };
-
     document.addEventListener("keydown", handleKeyDown);
+
+    let loopId;
+    const loop = () => { loopId = requestAnimationFrame(loop); _mainLoopFBRef.current(); };
+    loopId = requestAnimationFrame(loop);
+
     return () => {
       cancelAnimationFrame(loopId);
       document.removeEventListener("keydown", handleKeyDown);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
-      if (cameraRef.current) cameraRef.current.stop();
-      if (handsModuleRef.current) handsModuleRef.current.close();
-      if (poseModuleRef.current) poseModuleRef.current.close();
+      if (cameraRef.current) {
+        try {
+          cameraRef.current.stop();
+        } catch (e) {
+          console.warn("Error stopping camera:", e);
+        }
+      }
+      if (handsModuleRef.current) {
+        try {
+          handsModuleRef.current.close();
+        } catch (e) {
+          if (!String(e?.message || "").includes("already deleted")) {
+            console.warn("Error closing hands module:", e);
+          }
+        } finally {
+          handsModuleRef.current = null;
+        }
+      }
+      if (poseModuleRef.current) {
+        try {
+          poseModuleRef.current.close();
+        } catch (e) {
+          if (!String(e?.message || "").includes("already deleted")) {
+            console.warn("Error closing pose module:", e);
+          }
+        } finally {
+          poseModuleRef.current = null;
+        }
+      }
     };
-  }, [setupGrid, setupMediaPipe, mainLoop]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount/unmount only
   // ==================== RENDER ====================
   const themeStyles = {
     container: {
@@ -1095,7 +1151,11 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           hand: log.hand,
           responsetime: log.timestamp
         }));
-        gameSessionBuffer.update({ sessionScore: scoreRef.current, playData });
+        gameSessionBuffer.update({ 
+          sessionScore: scoreRef.current, 
+          playData,
+          coordinates: coordinateLogRef.current.map(p => ({ ...p }))
+        });
       }} />
     </div>
   );

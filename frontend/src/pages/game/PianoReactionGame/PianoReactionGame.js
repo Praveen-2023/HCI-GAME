@@ -234,6 +234,7 @@ const PlayingGame = ({
   onResume,
   onEnd,
   onReset,
+  onBeforeSave,
   currentSection,
   feedbackSection,
   feedbackType,
@@ -272,28 +273,32 @@ const PlayingGame = ({
         style={{ backgroundColor: PRIMARY_BLUE, color: "white" }}
       >
         <h1 className="text-xl font-bold">Piano Reaction Game</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
           <button
             onClick={isPaused ? onResume : onPause}
-            className={`p-2 rounded-lg transition ${isPaused ? "bg-green-500 hover:bg-green-600 text-white" : "bg-red-400 hover:bg-red-500 text-white"}`}
+            className={`p-2 rounded-lg transition flex items-center gap-1 text-sm font-semibold ${
+              isPaused ? "bg-green-500 hover:bg-green-600 text-white" : "bg-yellow-400 hover:bg-yellow-500 text-gray-900"
+            }`}
           >
             {isPaused ? (
-              <Play className="w-5 h-5" />
+              <><Play className="w-4 h-4" /> Resume</>
             ) : (
-              <Pause className="w-5 h-5" />
+              <><Pause className="w-4 h-4" /> Pause</>
             )}
           </button>
           <button
             onClick={onEnd}
-            className="p-2 bg-white hover:bg-gray-200 text-gray-800 rounded-lg transition font-semibold"
+            className="p-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition text-sm font-semibold flex items-center gap-1"
+            title="End this round (keeps data, play another round or Save & Exit to save)"
           >
-            💾 Save
+            <RotateCcw className="w-4 h-4" /> End Round
           </button>
           <button
             onClick={onReset}
-            className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition"
+            className="p-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
+            title="Reset all data and start fresh"
           >
-            <RotateCcw className="w-5 h-5" />
+            <span className="text-xs font-bold">Reset</span>
           </button>
         </div>
       </div>
@@ -427,7 +432,10 @@ const PlayingGame = ({
       </div>
 
       {/* Handle key presses - invisible focus */}
-      {isPaused ? null : (
+      {/* Floating Save & Exit button — always visible during gameplay */}
+      <SaveExitButton onBeforeSave={onBeforeSave} />
+      {/* Paused overlay */}
+      {!isPaused && (
         <div
           tabIndex={-1}
           className="invisible fixed inset-0"
@@ -443,6 +451,7 @@ const PlayingGame = ({
           ref={(el) => el && el.focus()}
         />
       )}
+
     </div>
   );
 };
@@ -826,6 +835,7 @@ const PianoReactionGame = () => {
         onResume={resumeGame}
         onEnd={endGame}
         onReset={resetGame}
+        onBeforeSave={handleBeforeSave}
         currentSection={currentSection}
         feedbackSection={feedbackSection}
         feedbackType={feedbackType}

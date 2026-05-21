@@ -5,6 +5,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import gameSessionBuffer from "../../../services/gameSessionBuffer";
 import SaveExitButton from "../SaveExitButton";
+import { COORD_SAMPLE_INTERVAL_MS, MAX_COORDS_PER_SESSION } from "../../../constants";
 // ==================== CONFIGURATION ====================
 const CONFIG = {
   SESSION_SECONDS: 300,
@@ -169,6 +170,8 @@ const ShapeTracingGame = () => {
   const currentTargetIdxRef = useRef(0);
   const drawnPathRef = useRef([]);
   const lastPoseResultsRef = useRef(null);
+  const coordinateLogRef = useRef([]);
+  const lastCoordTimeRef = useRef(0);
 
   // ==================== UTILITY FUNCTIONS ====================
   const distNorm = (a, b) => {
@@ -441,7 +444,9 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       ) {
         if (distNorm(pos, shape.points[0]) < CONFIG.PICK_DISTANCE) {
           shape.drawingHand = label;
-          drawnPathRef.current = [{ ...pos }];
+          const startPoint = { ...pos, timestamp: nowSec() };
+          drawnPathRef.current = [startPoint];
+          coordinateLogRef.current.push(startPoint);
           currentTargetIdxRef.current = 1;
           logsRef.current.push({
             timestamp: nowSec(),
@@ -456,7 +461,14 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         }
       } else if (isDrawing) {
         if (hand.closed) {
-          drawnPathRef.current.push({ ...pos });
+          const tracedPoint = { ...pos, timestamp: nowSec() };
+          drawnPathRef.current.push(tracedPoint);
+          if (Date.now() - lastCoordTimeRef.current > COORD_SAMPLE_INTERVAL_MS) {
+            if (coordinateLogRef.current.length < MAX_COORDS_PER_SESSION) {
+              coordinateLogRef.current.push(tracedPoint);
+            }
+            lastCoordTimeRef.current = Date.now();
+          }
           // Advance targets if close
           while (
             currentTargetIdxRef.current < shape.points.length &&
@@ -865,14 +877,16 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       }
     }, 1000);
 
-    logsRef.current.push({ timestamp: 0, event: "session_start" });
-    // Init local session buffer
-    gameSessionBuffer.init('shape_tracing', 'Shape Tracing');
-    showStatus(
-      "🎮 Session started! Close hand near first point to begin tracing.",
-      3000,
-    );
-  };
+     logsRef.current.push({ timestamp: 0, event: "session_start" });
+     coordinateLogRef.current = [];
+     lastCoordTimeRef.current = 0;
+     // Init local session buffer
+     gameSessionBuffer.init('shape_tracing', 'Shape Tracing');
+     showStatus(
+       "🎮 Session started! Close hand near first point to begin tracing.",
+       3000,
+     );
+   };
 
   const handleEndSession = async () => {
     setIsSessionActive(false);
@@ -898,7 +912,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     gameSessionBuffer.update({
       sessionScore: scoreRef.current,
       playData,
-      coordinates: drawnPathRef.current.map(p => ({ x: p.x, y: p.y, timestamp: nowSec() }))
+      coordinates: coordinateLogRef.current.map(p => ({ ...p }))
     });
 
     alert(
@@ -1009,27 +1023,62 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     showDebugRef.current = showDebug;
   }, [showDebug]);
 
-  useEffect(() => {
-    setupMediaPipe();
+  const _stSetupMPRef = React.useRef(setupMediaPipe);
+  _stSetupMPRef.current = setupMediaPipe;
+  const _stMainLoopRef = React.useRef(mainLoop);
+  _stMainLoopRef.current = mainLoop;
 
-    const loopId = requestAnimationFrame(mainLoop);
+  useEffect(() => {
+    _stSetupMPRef.current();
+
     const handleKeyDown = (e) => {
       if (e.key === "d" || e.key === "D") {
         setShowDebug((prev) => !prev);
       }
     };
-
     document.addEventListener("keydown", handleKeyDown);
+
+    let loopId;
+    const loop = () => { loopId = requestAnimationFrame(loop); _stMainLoopRef.current(); };
+    loopId = requestAnimationFrame(loop);
+
     return () => {
       cancelAnimationFrame(loopId);
       document.removeEventListener("keydown", handleKeyDown);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
-      if (cameraRef.current) cameraRef.current.stop();
-      if (handsModuleRef.current) handsModuleRef.current.close();
-      if (poseModuleRef.current) poseModuleRef.current.close();
+      if (cameraRef.current) {
+        try {
+          cameraRef.current.stop();
+        } catch (e) {
+          console.warn("Error stopping camera:", e);
+        }
+      }
+      if (handsModuleRef.current) {
+        try {
+          handsModuleRef.current.close();
+        } catch (e) {
+          if (!String(e?.message || "").includes("already deleted")) {
+            console.warn("Error closing hands module:", e);
+          }
+        } finally {
+          handsModuleRef.current = null;
+        }
+      }
+      if (poseModuleRef.current) {
+        try {
+          poseModuleRef.current.close();
+        } catch (e) {
+          if (!String(e?.message || "").includes("already deleted")) {
+            console.warn("Error closing pose module:", e);
+          }
+        } finally {
+          poseModuleRef.current = null;
+        }
+      }
     };
-  }, [setupMediaPipe, mainLoop]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount/unmount only
 
   // ==================== RENDER ====================
   // --- DYNAMIC STYLES ---
@@ -1229,7 +1278,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         gameSessionBuffer.update({
           sessionScore: scoreRef.current,
           playData,
-          coordinates: drawnPathRef.current.map(p => ({ x: p.x, y: p.y }))
+          coordinates: coordinateLogRef.current.map(p => ({ ...p }))
         });
       }} />
     </div>
