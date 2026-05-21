@@ -5,6 +5,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import gameSessionBuffer from "../../../services/gameSessionBuffer";
 import SaveExitButton from "../SaveExitButton";
+import { COORD_SAMPLE_INTERVAL_MS, MAX_COORDS_PER_SESSION } from "../../../constants";
 
 // ==================== MEDIAPIPE MODULE-LEVEL SINGLETONS ====================
 // Stored outside the component so React StrictMode's double-mount does NOT
@@ -13,7 +14,7 @@ let _handsInst = null;
 let _poseInst = null;
 let _camInst = null;
 
-import { COORD_SAMPLE_INTERVAL_MS, MAX_COORDS_PER_SESSION } from "../../../constants";
+
 // ==================== CONFIGURATION ====================
 const CONFIG = {
   SESSION_SECONDS: 300,
@@ -85,6 +86,7 @@ const FruitBasketGame = () => {
   const sessionStartRef = useRef(null);
   const timerIntervalRef = useRef(null);
   const calibIntervalRef = useRef(null);
+  const cameraRef = useRef(null);
   const lastDrawTimeRef = useRef(0);
   const logsRef = useRef([]);
   const attemptsRef = useRef(0);
@@ -1602,8 +1604,6 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
   _setupGridRef.current = setupGrid;
   const _setupMPRef = React.useRef(setupMediaPipe);
   _setupMPRef.current = setupMediaPipe;
-  const _mainLoopFBRef = React.useRef(mainLoop);
-  _mainLoopFBRef.current = mainLoop;
 
   useEffect(() => {
     _setupGridRef.current();
@@ -1624,10 +1624,6 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       }
     };
     document.addEventListener("keydown", handleKeyDown);
-
-    let loopId;
-    const loop = () => { loopId = requestAnimationFrame(loop); _mainLoopFBRef.current(); };
-    loopId = requestAnimationFrame(loop);
 
     return () => {
       cancelAnimationFrame(loopId);
