@@ -44,7 +44,7 @@ import {
   Moon,
   Download,
 } from "lucide-react";
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { gameService } from "../../services/gameService";
@@ -711,6 +711,347 @@ const CoordinateVisualizer = ({ coordinates }) => {
   );
 };
 
+
+// import React, { useState, useEffect, useRef, useMemo } from "react";
+
+// Distinct colors for each finger
+const FINGER_COLORS = {
+  leftPinky: "#EC4899",   // Pink
+  leftRing: "#F59E0B",    // Amber
+  leftMiddle: "#EAB308",  // Yellow
+  leftIndex: "#10B981",   // Emerald
+  rightIndex: "#14B8A6",  // Teal
+  rightMiddle: "#3B82F6", // Blue
+  rightRing: "#6366F1",   // Indigo
+  rightPinky: "#A855F7",  // Purple
+  // Generic fallbacks
+  thumb: "#F97316",       // Orange
+  index: "#34D399",
+  middle: "#60A5FA",
+  ring: "#818CF8",
+  pinky: "#C084FC",
+  default: "#6B7280"      // Gray
+};
+
+// Logical left-to-right keyboard sorting weights
+const FINGER_SORT_ORDER = {
+  // Left Hand
+  Q: 10, A: 11, Z: 12,
+  W: 20, S: 21, X: 22,
+  E: 30, D: 31, C: 32,
+  R: 40, F: 41, V: 42, T: 43, G: 44, B: 45,
+  // Right Hand
+  Y: 50, H: 51, N: 52, U: 53, J: 54, M: 55,
+  I: 60, K: 61, ",": 62,
+  O: 70, L: 71, ".": 72,
+  P: 80, ";": 81, "/": 82,
+  // Space
+  " ": 90
+};
+
+const FingerClickVisualizer = ({ fingerTimeouts, movements, isDarkMode }) => {
+  const [activeStep, setActiveStep] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const timerRef = useRef(null);
+
+  // Determine exactly which fingers were involved in this session
+  const activeFingersSet = useMemo(() => {
+    const fingers = new Set();
+    if (movements) {
+      movements.forEach(m => {
+        if (m.finger) fingers.add(m.finger);
+        if (m.expectedFinger) fingers.add(m.expectedFinger);
+      });
+    }
+    return fingers;
+  }, [movements]);
+
+  // 1. Sort keys left-to-right
+  // 2. Map keys to a single horizontal row
+  // 3. Attach the Expected Finger name
+  const activeKeyCoords = useMemo(() => {
+    if (!movements || movements.length === 0) return {};
+
+    const keyDataMap = {};
+    movements.forEach(m => {
+      if (m.key) {
+        const k = m.key.toUpperCase();
+        if (!keyDataMap[k]) {
+          keyDataMap[k] = { key: k, expectedFinger: m.expectedFinger };
+        }
+      }
+    });
+
+    const getSortWeight = (k) => FINGER_SORT_ORDER[k] || 100;
+    
+    // Sort keys logically based on keyboard position
+    const sortedKeys = Object.values(keyDataMap).sort((a, b) => getSortWeight(a.key) - getSortWeight(b.key));
+    
+    const coords = {};
+    const totalKeys = sortedKeys.length;
+    const spacing = 100 / (totalKeys + 1);
+
+    sortedKeys.forEach((item, index) => {
+      coords[item.key] = {
+        x: spacing * (index + 1),
+        y: 50, // All on one horizontal line
+        expectedFinger: item.expectedFinger
+      };
+    });
+
+    return coords;
+  }, [movements]);
+
+  useEffect(() => {
+    setActiveStep(0);
+    setIsPlaying(false);
+  }, [movements]);
+
+  useEffect(() => {
+    if (isPlaying) {
+      const intervalTime = Math.max(200, 1000 / playbackSpeed);
+      timerRef.current = setInterval(() => {
+        setActiveStep((prev) => {
+          if (prev >= movements.length - 1) {
+            setIsPlaying(false);
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, intervalTime);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isPlaying, movements, playbackSpeed]);
+
+  if (!movements || movements.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-400">
+        No playing data recorded for this session.
+      </div>
+    );
+  }
+
+  const currentMove = movements[activeStep];
+  const previousMove = activeStep > 0 ? movements[activeStep - 1] : null;
+
+  // Helper formats: "leftIndex" -> "L Index"
+  const formatFingerShort = (str) => {
+    if (!str) return "";
+    const lower = str.toLowerCase();
+    if (lower.includes("left")) return "L " + str.replace(/left/i, "").charAt(0).toUpperCase() + str.replace(/left/i, "").slice(1);
+    if (lower.includes("right")) return "R " + str.replace(/right/i, "").charAt(0).toUpperCase() + str.replace(/right/i, "").slice(1);
+    return str.charAt(0).toUpperCase() + str.slice(1);
+  };
+
+  const formatFingerFull = (str) => {
+    if (!str) return "N/A";
+    const spaced = str.replace(/([A-Z])/g, " $1");
+    return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+  };
+
+  // Filter timeouts to only show the ones actively used in the movements
+  const filteredTimeouts = fingerTimeouts 
+    ? Object.entries(fingerTimeouts).filter(([finger]) => activeFingersSet.has(finger))
+    : [];
+
+  return (
+    <div className="space-y-4">
+      
+      {/* Session Finger Timeouts / Matrix Panel - NOW FILTERED */}
+      {filteredTimeouts.length > 0 && (
+        <div className="bg-gray-100 dark:bg-gray-800/50 p-3 rounded-xl border border-gray-200 dark:border-gray-700">
+          <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wider">
+            Active Fingers & Time Limits
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {filteredTimeouts.map(([finger, timeout]) => {
+              const dotColor = FINGER_COLORS[finger] || FINGER_COLORS.default;
+              return (
+                <div 
+                  key={finger} 
+                  className="flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-300 shadow-sm"
+                >
+                  <div 
+                    className="w-2.5 h-2.5 rounded-full shadow-sm" 
+                    style={{ backgroundColor: dotColor }} 
+                  />
+                  <span className="font-medium">{formatFingerFull(finger)}</span>
+                  <span className="text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-md ml-1 font-mono">
+                    {timeout}s
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* SVG Canvas */}
+      <div className="relative w-full aspect-[2.5/1] bg-gray-900 rounded-2xl border border-gray-800 shadow-inner overflow-hidden">
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:5%_10%] opacity-20"></div>
+
+        <svg viewBox="0 0 100 100" className="w-full h-full p-4">
+          
+          {/* Draw ONLY the keys used in this session */}
+          {Object.entries(activeKeyCoords).map(([letter, pos]) => {
+            const isCurrent = currentMove?.key?.toUpperCase() === letter;
+            const isPrevious = previousMove?.key?.toUpperCase() === letter && !isCurrent;
+            
+            let fillColor = "#1F2937";      // Default dark gray background
+            let strokeColor = "#374151";    // Default border
+            let strokeWidth = "0.3";        // Default thin border
+            let textColor = "#9CA3AF";      // Default text color
+
+            if (isCurrent) {
+              // Current key gets bright colors and thick border
+              fillColor = FINGER_COLORS[currentMove?.finger] || FINGER_COLORS.default;
+              strokeColor = currentMove.correct ? "#10B981" : "#EF4444"; // Bright Green/Red
+              strokeWidth = "1.5";
+              textColor = "#FFFFFF";
+            } else if (isPrevious) {
+              // Previous key gets a faded, darker border to show the "ghost" of the last press
+              strokeColor = previousMove.correct ? "#064E3B" : "#7F1D1D"; // Dark Green/Red
+              strokeWidth = "0.7"; 
+              textColor = "#D1D5DB";
+            }
+
+            return (
+              <g key={letter} transform={`translate(${pos.x}, ${pos.y})`}>
+                <rect
+                  x="-5"
+                  y="-6"
+                  width="10"
+                  height="12"
+                  rx="2"
+                  fill={fillColor}
+                  stroke={strokeColor}
+                  strokeWidth={strokeWidth}
+                  className="transition-all duration-300 shadow-lg"
+                />
+                <text
+                  textAnchor="middle"
+                  dy="1.5"
+                  fontSize="4"
+                  fontWeight="bold"
+                  fill={textColor}
+                  className="transition-colors duration-300"
+                >
+                  {letter}
+                </text>
+                
+                {/* Finger Name Display below Key */}
+                <text
+                  textAnchor="middle"
+                  dy="11"
+                  fontSize="2.5"
+                  fontWeight="500"
+                  fill={isCurrent ? strokeColor : (isPrevious ? strokeColor : "#6B7280")}
+                  className="transition-colors duration-300"
+                >
+                  {formatFingerShort(pos.expectedFinger)}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+
+        {/* Live Metrics overlay */}
+        {currentMove && (
+          <div className="absolute bottom-3 left-3 right-3 flex justify-between items-center bg-black/80 backdrop-blur-sm border border-gray-800 p-3 rounded-xl text-white text-xs font-mono">
+            <div className="flex flex-col">
+              <span className="text-gray-400 text-[10px]">Step</span>
+              <span>{activeStep + 1} / {movements.length}</span>
+            </div>
+            
+            <div className="flex flex-col items-center">
+              <span className="text-gray-400 text-[10px]">Target</span>
+              <span className={`font-bold text-lg ${currentMove.correct ? "text-emerald-400" : "text-red-400"}`}>
+                {currentMove.key}
+              </span>
+            </div>
+
+            <div className="flex flex-col">
+              <span className="text-gray-400 text-[10px]">Action</span>
+              <span className="flex items-center gap-1">
+                <div 
+                  className="w-2 h-2 rounded-full" 
+                  style={{ backgroundColor: FINGER_COLORS[currentMove.finger] || FINGER_COLORS.default }}
+                />
+                {formatFingerFull(currentMove.finger)}
+              </span>
+              {currentMove.finger !== currentMove.expectedFinger && (
+                <span className="text-[9px] text-red-400">
+                  Expected: {formatFingerFull(currentMove.expectedFinger)}
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-col text-right">
+              <span className="text-gray-400 text-[10px]">Speed</span>
+              <span className={
+                  fingerTimeouts && currentMove.responsetime > (fingerTimeouts[currentMove.finger] || 99) 
+                  ? "text-red-400" 
+                  : "text-emerald-400"
+                }
+              >
+                {currentMove.responsetime}s
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Control Buttons */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setIsPlaying(!isPlaying)}
+          className={`px-4 py-2 text-white font-bold text-xs rounded-xl transition-all active:scale-95 ${
+            isPlaying ? "bg-amber-500 hover:bg-amber-600" : "bg-blue-500 hover:bg-blue-600"
+          }`}
+        >
+          {isPlaying ? "Pause" : "Play Action"}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setIsPlaying(false); setActiveStep(0); }}
+          className="px-4 py-2 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold text-xs rounded-xl transition-all active:scale-95 border dark:border-gray-600"
+        >
+          Reset
+        </button>
+
+        <input
+          type="range"
+          min="0"
+          max={movements.length - 1}
+          value={activeStep}
+          onChange={(e) => { setIsPlaying(false); setActiveStep(parseInt(e.target.value)); }}
+          className="flex-1 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+        />
+
+        <select
+          value={playbackSpeed}
+          onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+          className="px-2 py-1.5 text-xs font-bold bg-gray-100 dark:bg-gray-800 border dark:border-gray-600 rounded-lg outline-none cursor-pointer dark:text-white"
+        >
+          <option value="0.5">0.5x</option>
+          <option value="1">1.0x</option>
+          <option value="2">2.0x</option>
+        </select>
+      </div>
+    </div>
+  );
+};
+
+// export default FingerClickVisualizer;
+
+// export default FingerClickVisualizer;
+
 const LaptopMovementVisualizer = ({ movements, isDarkMode }) => {
   const [activeStep, setActiveStep] = React.useState(0);
   const [isPlaying, setIsPlaying] = React.useState(false);
@@ -933,6 +1274,8 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
   const laptopMovements = session?.laptopMovements || [];
   const mobileMovements = session?.mobileMovements || [];
 
+  console.log("Session Data:", session);
+
   if (mode === "laptop") {
     const totalDistance = laptopMovements.reduce((sum, m) => sum + (m.distance || 0), 0);
     const avgDistance = laptopMovements.length > 0 ? totalDistance / laptopMovements.length : 0;
@@ -961,7 +1304,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
         <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
           <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Wrist/Arm Movement Vector Trajectory</h3>
           <p className="text-xs text-gray-400 mb-4">Sequential coordinate path mapping response targets in absolute pixel coordinates.</p>
-          <LaptopMovementVisualizer movements={laptopMovements} isDarkMode={isDarkMode} />
+          <FingerClickVisualizer fingerTimeouts={session?.fingerTimeouts} movements={mobileMovements} isDarkMode={isDarkMode} />
         </div>
       </div>
     );
@@ -1796,7 +2139,18 @@ const DashboardContent = ({
                     <h3 className="text-base font-bold text-gray-800 dark:text-white">Hand/Cursor Movement Trajectory</h3>
                     <span className="text-xs text-gray-400 font-medium">— Session {selectedSession + 1}</span>
                   </div>
-                  <CoordinateVisualizer coordinates={selectedCoordinates} />
+                  <CoordinateVisualizer coordinates={selectedSessionData?.session?.coordinates} />
+                </div> 
+              )}
+
+              {console.log(selectedSessionData.session.coordinates)}
+              
+              {/* Laptop Visualizer */}
+              {selectedGameType !== "board_drawing" && (selectedGame?.hasCoordinates || (selectedGameType === "type1" && pianoSubTab === "ankle")) && selectedCoordinates.length > 0 && (
+                <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+                  <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Wrist/Arm Movement Vector Trajectory</h3>
+                  <p className="text-xs text-gray-400 mb-4">Sequential coordinate path mapping response targets in absolute pixel coordinates.</p>
+                  <LaptopMovementVisualizer movements={selectedSessionData?.session?.laptopMovements} isDarkMode={isDarkMode} />
                 </div>
               )}
               
