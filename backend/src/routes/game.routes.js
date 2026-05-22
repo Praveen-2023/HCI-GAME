@@ -1,8 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const gameController = require('../controllers/game.controller');
+const boardDrawingController = require('../controllers/boardDrawing.controller');
 const { protect } = require('../middleware/auth.middleware');
 
+router.post('/board-drawing/save-session', protect, boardDrawingController.saveBoardDrawingSession);
+router.get('/board-drawing/sessions/:userId?', protect, boardDrawingController.getBoardDrawingSessions);
 router.post('/save-session', protect, gameController.saveGameSession);
 router.get('/levelspan/:userId?', protect, gameController.getLevelSpan);
 router.put('/levelspan/:userId', protect, gameController.updateLevelSpan);

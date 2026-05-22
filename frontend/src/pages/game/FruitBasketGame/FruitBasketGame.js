@@ -47,7 +47,7 @@ const FruitBasketGame = () => {
   const [calibTimeLeft, setCalibTimeLeft] = useState(0);
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [usingMouseFallback] = useState(false);
+  const [usingMouseFallback, setUsingMouseFallback] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [statusMessage, setStatusMessage] = useState({
     text: "",
@@ -175,7 +175,8 @@ const FruitBasketGame = () => {
   const fruitRef = useRef(null);
   const basketIdxRef = useRef(null);
   const coordinateLogRef = useRef([]);
-  const lastCoordTimeRef = useRef(0);
+  const lastLeftCoordTimeRef = useRef(0);
+  const lastRightCoordTimeRef = useRef(0);
   const lastPoseResultsRef = useRef(null);
 
   // ==================== UTILITY FUNCTIONS ====================
@@ -633,7 +634,8 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       if (!hand.smoothPos || !hand.visible) return;
       
       // Track downsampled coordinates for relative hand trajectory visualization
-      if (sessionStartRef.current && Date.now() - lastCoordTimeRef.current > COORD_SAMPLE_INTERVAL_MS) {
+      const lastHandCoordTimeRef = label === "Left" ? lastLeftCoordTimeRef : lastRightCoordTimeRef;
+      if (sessionStartRef.current && Date.now() - lastHandCoordTimeRef.current > COORD_SAMPLE_INTERVAL_MS) {
         if (coordinateLogRef.current.length < MAX_COORDS_PER_SESSION) {
           coordinateLogRef.current.push({
             x: hand.smoothPos.x,
@@ -641,7 +643,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             timestamp: nowSec()
           });
         }
-        lastCoordTimeRef.current = Date.now();
+        lastHandCoordTimeRef.current = Date.now();
       }
 
       const source = gridHolesRef.current[fruitRef.current.sourceIdx];
@@ -1415,7 +1417,8 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
     logsRef.current.push({ timestamp: 0, event: "session_start" });
     coordinateLogRef.current = [];
-    lastCoordTimeRef.current = 0;
+    lastLeftCoordTimeRef.current = 0;
+    lastRightCoordTimeRef.current = 0;
     gameSessionBuffer.init('fruit_basket', 'Arm – Fruit Fetch');
     showStatus("🎮 Session started! Close hand to grab fruit!", 3000);
   };
@@ -1885,6 +1888,20 @@ Calibration:
             />
             <span>Assistive Mode (Dwell pick/drop)</span>
           </label>
+          <label style={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={usingMouseFallback}
+              disabled={isSessionActive}
+              onChange={(e) => {
+                const val = e.target.checked;
+                setUsingMouseFallback(val);
+                usingMouseFallbackRef.current = val;
+              }}
+              style={styles.checkbox}
+            />
+            <span>Mouse Fallback (Test without Webcam)</span>
+          </label>
         </div>
         
         <div style={themeStyles.stats}>
@@ -1904,7 +1921,7 @@ Calibration:
             <div style={themeStyles.statLabel}>Timer</div>
             <div style={themeStyles.statValue}>{formatTime(timeRemaining)}</div>
           </div>
-          <div style={themeStyles.statItem} style={{ gridColumn: "span 2", textAlign: "center" }}>
+          <div style={{ ...themeStyles.statItem, gridColumn: "span 2", textAlign: "center" }}>
             <div style={themeStyles.statLabel}>Success Rate</div>
             <div style={themeStyles.statValue}>{successRate}%</div>
           </div>

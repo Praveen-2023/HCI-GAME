@@ -52,6 +52,7 @@ import { userService } from "../../services/userService";
 import { reminderService } from "../../services/reminderService";
 import ChatPage from "../common/ChatPage";
 import PatientAppointments from "./PatientAppointments";
+import BoardDrawingTrajectoryReplay from "../game/BoardDrawingTrajectoryReplay";
 
 export default function PatientDashboard({ userId }) {
   const { user, logout, isDarkMode, toggleDarkMode } = useAuth();
@@ -710,6 +711,346 @@ const CoordinateVisualizer = ({ coordinates }) => {
   );
 };
 
+const LaptopMovementVisualizer = ({ movements, isDarkMode }) => {
+  const [activeStep, setActiveStep] = React.useState(0);
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = React.useState(1);
+  const timerRef = React.useRef(null);
+
+  React.useEffect(() => {
+    setActiveStep(0);
+    setIsPlaying(false);
+  }, [movements]);
+
+  React.useEffect(() => {
+    if (isPlaying) {
+      const intervalTime = Math.max(200, 1000 / playbackSpeed);
+      timerRef.current = setInterval(() => {
+        setActiveStep((prev) => {
+          if (prev >= movements.length - 1) {
+            setIsPlaying(false);
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, intervalTime);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isPlaying, movements, playbackSpeed]);
+
+  if (!movements || movements.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-400">
+        No transition vector data recorded for this session.
+      </div>
+    );
+  }
+
+  // Get distinct keys list to draw keyboard layout
+  const points = [];
+  movements.forEach((m) => {
+    if (m.fromX && m.fromY && m.fromKey) points.push({ x: m.fromX, y: m.fromY, label: m.fromKey });
+    if (m.toX && m.toY && m.toKey) points.push({ x: m.toX, y: m.toY, label: m.toKey });
+  });
+
+  // Deduplicate points based on label
+  const uniqueKeysMap = {};
+  points.forEach(p => {
+    if (p.label) uniqueKeysMap[p.label] = p;
+  });
+  const uniqueKeys = Object.values(uniqueKeysMap);
+
+  if (uniqueKeys.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-400">
+        No valid coordinates found in movement logs.
+      </div>
+    );
+  }
+
+  // Normalize
+  const xCoords = uniqueKeys.map(p => p.x);
+  const yCoords = uniqueKeys.map(p => p.y);
+  const minX = Math.min(...xCoords);
+  const maxX = Math.max(...xCoords);
+  const minY = Math.min(...yCoords);
+  const maxY = Math.max(...yCoords);
+
+  const normX = (x) => {
+    if (maxX === minX) return 50;
+    return 15 + ((x - minX) / (maxX - minX)) * 70;
+  };
+
+  const normY = (y) => {
+    if (maxY === minY) return 25;
+    return 20 + ((y - minY) / (maxY - minY)) * 10;
+  };
+
+  const currentMove = movements[activeStep];
+
+  return (
+    <div className="space-y-4">
+      {/* SVG Canvas */}
+      <div className="relative w-full aspect-[2.5/1] bg-gray-900 rounded-2xl border border-gray-800 shadow-inner overflow-hidden">
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:5%_10%] opacity-20"></div>
+        
+        <svg viewBox="0 0 100 50" className="w-full h-full p-4">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="15" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 2 L 10 5 L 0 8 z" fill="#3b82f6" />
+            </marker>
+            <marker id="arrow-active" viewBox="0 0 10 10" refX="15" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 2 L 10 5 L 0 8 z" fill="#ef4444" />
+            </marker>
+          </defs>
+
+          {/* All transitions in grey */}
+          {movements.map((m, idx) => {
+            if (!m.fromX || !m.toX) return null;
+            return (
+              <line
+                key={`line-${idx}`}
+                x1={normX(m.fromX)}
+                y1={normY(m.fromY)}
+                x2={normX(m.toX)}
+                y2={normY(m.toY)}
+                stroke="#374151"
+                strokeWidth="0.4"
+                strokeDasharray="1,1"
+              />
+            );
+          })}
+
+          {/* Active transition arrow */}
+          {currentMove && currentMove.fromX && currentMove.toX && (
+            <line
+              x1={normX(currentMove.fromX)}
+              y1={normY(currentMove.fromY)}
+              x2={normX(currentMove.toX)}
+              y2={normY(currentMove.toY)}
+              stroke="#EF4444"
+              strokeWidth="1.2"
+              markerEnd="url(#arrow-active)"
+              className="transition-all duration-300"
+            />
+          )}
+
+          {/* Draw keycap circles */}
+          {uniqueKeys.map((k) => {
+            const isActive = currentMove && (currentMove.fromKey === k.label || currentMove.toKey === k.label);
+            const isToKey = currentMove && currentMove.toKey === k.label;
+            return (
+              <g key={k.label} transform={`translate(${normX(k.x)}, ${normY(k.y)})`}>
+                <circle
+                  r="3.5"
+                  fill={isToKey ? "#EF4444" : isActive ? "#3B82F6" : "#1F2937"}
+                  stroke="#fff"
+                  strokeWidth="0.5"
+                  className="transition-colors duration-200"
+                />
+                <text
+                  textAnchor="middle"
+                  dy="0.8"
+                  fontSize="2.5"
+                  fontWeight="bold"
+                  fill="#fff"
+                >
+                  {k.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+
+        {/* Live Metrics overlay */}
+        {currentMove && (
+          <div className="absolute bottom-3 left-3 right-3 flex justify-between bg-black/80 backdrop-blur-sm border border-gray-800 p-2.5 rounded-xl text-white text-[10px] font-mono">
+            <div>
+              <span className="text-gray-400">Step:</span> {activeStep + 1} / {movements.length}
+            </div>
+            <div>
+              <span className="text-gray-400">Move:</span> {currentMove.fromKey} ➔ {currentMove.toKey}
+            </div>
+            <div>
+              <span className="text-gray-400">Dist:</span> {currentMove.distance} px
+            </div>
+            <div>
+              <span className="text-gray-400">Vector:</span> ({currentMove.dx}, {currentMove.dy})
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Control Buttons */}
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setIsPlaying(!isPlaying)}
+          className={`px-3 py-1.5 text-white font-bold text-xs rounded-xl transition-all active:scale-95 ${
+            isPlaying ? "bg-amber-500 hover:bg-amber-600" : "bg-primary-500 hover:bg-primary-600"
+          }`}
+        >
+          {isPlaying ? "Pause" : "Play Path"}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setIsPlaying(false); setActiveStep(0); }}
+          className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-bold text-xs rounded-xl transition-all active:scale-95 border dark:border-gray-600"
+        >
+          Reset
+        </button>
+
+        <input
+          type="range"
+          min="0"
+          max={movements.length - 1}
+          value={activeStep}
+          onChange={(e) => { setIsPlaying(false); setActiveStep(parseInt(e.target.value)); }}
+          className="flex-1 h-1 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
+        />
+
+        <select
+          value={playbackSpeed}
+          onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+          className="px-2 py-1 text-xs font-bold bg-gray-100 dark:bg-gray-700 border dark:border-gray-600 rounded-lg outline-none cursor-pointer dark:text-white"
+        >
+          <option value="0.5">0.5x</option>
+          <option value="1">1.0x</option>
+          <option value="2">2.0x</option>
+        </select>
+      </div>
+    </div>
+  );
+};
+
+const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
+  const mode = session?.mode || "laptop";
+  const fingerTimeouts = session?.fingerTimeouts || { thumb: 5, index: 5, middle: 5, ring: 5, pinky: 5 };
+  const laptopMovements = session?.laptopMovements || [];
+  const mobileMovements = session?.mobileMovements || [];
+
+  if (mode === "laptop") {
+    const totalDistance = laptopMovements.reduce((sum, m) => sum + (m.distance || 0), 0);
+    const avgDistance = laptopMovements.length > 0 ? totalDistance / laptopMovements.length : 0;
+
+    return (
+      <div className="space-y-6 mt-4">
+        {/* Laptop Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+            <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Total Pixel Distance Moved</p>
+            <p className="text-3xl font-black text-primary-600 dark:text-primary-400">
+              {totalDistance.toFixed(1)} px
+            </p>
+            <p className="text-xs text-gray-400 mt-1">Sum of physical movement deltas between keys</p>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+            <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Avg Transition Distance</p>
+            <p className="text-3xl font-black text-secondary-600 dark:text-secondary-400">
+              {avgDistance.toFixed(1)} px
+            </p>
+            <p className="text-xs text-gray-400 mt-1">Average pixel travel per key response</p>
+          </div>
+        </div>
+
+        {/* Laptop Visualizer */}
+        <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+          <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Wrist/Arm Movement Vector Trajectory</h3>
+          <p className="text-xs text-gray-400 mb-4">Sequential coordinate path mapping response targets in absolute pixel coordinates.</p>
+          <LaptopMovementVisualizer movements={laptopMovements} isDarkMode={isDarkMode} />
+        </div>
+      </div>
+    );
+  } else {
+    const fingerKeys = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+    const fingerEmojis = { thumb: "👍", index: "✍️", middle: "🖐️", ring: "💍", pinky: "🤙" };
+    const fingerNames = { thumb: "Thumb", index: "Index", middle: "Middle", ring: "Ring", pinky: "Pinky" };
+
+    const fingerStats = fingerKeys.map(finger => {
+      const movements = mobileMovements.filter(m => m.expectedFinger === finger);
+      const total = movements.length;
+      const correct = movements.filter(m => m.correct === 1).length;
+      const incorrect = movements.filter(m => m.correct === -1).length;
+      
+      const correctMovements = movements.filter(m => m.correct === 1 && m.responsetime > 0);
+      const avgResponse = correctMovements.length > 0
+        ? correctMovements.reduce((sum, m) => sum + m.responsetime, 0) / correctMovements.length
+        : 0;
+        
+      const accuracy = (correct + incorrect) > 0
+        ? (correct / (correct + incorrect)) * 100
+        : 0;
+
+      return {
+        finger,
+        name: fingerNames[finger],
+        emoji: fingerEmojis[finger],
+        total,
+        correct,
+        incorrect,
+        avgResponse,
+        accuracy,
+        timeout: fingerTimeouts[finger] || 5
+      };
+    }).filter(f => f.total > 0);
+
+    return (
+      <div className="space-y-6 mt-4">
+        {/* Mobile Stats Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          {fingerStats.map(f => (
+            <div key={f.finger} className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-150 dark:border-gray-700 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-2xl">{f.emoji}</span>
+                <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-lg text-[10px] font-bold">
+                  Limit: {f.timeout}s
+                </span>
+              </div>
+              <h4 className="font-bold text-sm text-gray-800 dark:text-white mb-1">{f.name} Finger</h4>
+              <p className="text-[11px] text-gray-400 mb-3">{f.correct} of {f.total} correct</p>
+              
+              <div className="space-y-2 pt-2 border-t dark:border-gray-700">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Response</span>
+                  <span className="font-bold text-primary-600 dark:text-primary-400">{f.avgResponse.toFixed(2)}s</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Accuracy</span>
+                  <span className="font-bold text-green-600 dark:text-green-400">{f.accuracy.toFixed(0)}%</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Comparison Chart */}
+        <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+          <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Finger Dexterity Profile</h3>
+          <p className="text-xs text-gray-400 mb-4">Response times and accuracy compared across active fingers.</p>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={fingerStats} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#1F2937" : "#F3F4F6"} />
+                <XAxis dataKey="name" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
+                <YAxis yAxisId="left" orientation="left" unit="s" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
+                <YAxis yAxisId="right" orientation="right" unit="%" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
+                <Tooltip contentStyle={{ backgroundColor: isDarkMode ? "#111827" : "#FFFFFF", borderColor: isDarkMode ? "#374151" : "#E5E7EB", borderRadius: "8px" }} />
+                <Legend />
+                <Bar yAxisId="left" dataKey="avgResponse" fill="#3B82F6" name="Avg Response (s)" radius={[4, 4, 0, 0]} />
+                <Bar yAxisId="right" dataKey="accuracy" fill="#10B981" name="Accuracy (%)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    );
+  }
+};
+
 // Extracted Dashboard content into its own component
 const GAMES_LIST = [
   {
@@ -729,7 +1070,7 @@ const GAMES_LIST = [
     path: "/board-drawing",
     desc: "Traces complex board paths to evaluate distal hand movements, precision, and tremor control.",
     clinicalFocus: "Fine motor control, hand tremor reduction, and continuous movement precision.",
-    hasCoordinates: true,
+    hasCoordinates: false,
     icon: "✏️",
     color: "from-blue-700 to-cyan-800",
     accent: "#2563EB",
@@ -766,6 +1107,7 @@ const DashboardContent = ({
   const defaultGameType = stats?.games?.[0]?.type || "type1";
   const [selectedGameType, setSelectedGameType] = useState(defaultGameType);
   const [viewMode, setViewMode] = useState("home"); // "home" or "details"
+  const [pianoSubTab, setPianoSubTab] = useState("finger"); // "finger" or "ankle"
 
   useEffect(() => {
     setIsMounted(true);
@@ -773,14 +1115,32 @@ const DashboardContent = ({
 
   const [editingReminder, setEditingReminder] = useState(null);
 
-  // Computations for charts - moved inside DashboardContent
   const recentSessions = useMemo(() => {
+    let sessions = [];
     if (stats?.games && stats.games.length > 0) {
       const selectedGame = stats.games.find(g => g.type === selectedGameType) || stats.games[0];
-      return selectedGame.recentSessions || [];
+      sessions = selectedGame.recentSessions || [];
+    } else {
+      sessions = stats?.recentSessions || (stats?.play ? [stats] : []);
     }
-    return stats?.recentSessions || (stats?.play ? [stats] : []);
-  }, [stats, selectedGameType]);
+
+    if (selectedGameType === "type1") {
+      return sessions.filter((s) => {
+        const gameType = s.gameType || s.session?.gameType;
+        const mode = s.mode || s.session?.mode;
+        const hasCoords = (s.coordinates && s.coordinates.length > 0) || (s.session?.coordinates && s.session?.coordinates.length > 0);
+        const isWrist = gameType === "piano_ankle" || mode === "piano_finger" || hasCoords;
+
+        if (pianoSubTab === "finger") {
+          return !isWrist;
+        } else {
+          return isWrist;
+        }
+      });
+    }
+
+    return sessions;
+  }, [stats, selectedGameType, pianoSubTab]);
   
   const today = useMemo(() => new Date(), []); // Stable reference for calculations
 
@@ -1138,6 +1498,13 @@ const DashboardContent = ({
     recentSessions[selectedSession]?.coordinates ||
     []
   );
+  const selectedBoardDrawingAttempts = (
+    recentSessions[selectedSession]?.session?.boardDrawingAttempts ||
+    recentSessions[selectedSession]?.boardDrawingAttempts ||
+    selectedSessionData?.session?.boardDrawingAttempts ||
+    selectedSessionData?.boardDrawingAttempts ||
+    []
+  );
 
   return (
     <div className="fade-in">
@@ -1226,6 +1593,34 @@ const DashboardContent = ({
               </button>
             ))}
           </div>
+
+          {/* Sub-tab Selector for Piano Reaction Game */}
+          {selectedGameType === "type1" && (
+            <div className="flex gap-2 p-1.5 bg-gray-100/80 dark:bg-gray-950/40 backdrop-blur-md rounded-2xl border border-gray-200/50 dark:border-gray-800/50 mb-6 max-w-md">
+              <button
+                onClick={() => { setPianoSubTab("finger"); setSelectedSession(0); }}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all duration-300 ${
+                  pianoSubTab === "finger"
+                    ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/10'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                }`}
+              >
+                <span>🖐️</span>
+                <span>Finger Dexterity</span>
+              </button>
+              <button
+                onClick={() => { setPianoSubTab("ankle"); setSelectedSession(0); }}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all duration-300 ${
+                  pianoSubTab === "ankle"
+                    ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/10'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+              }`}
+              >
+                <span>⌚</span>
+                <span>Wrist Movement</span>
+              </button>
+            </div>
+          )}
 
           {/* ── Charts & Visualizations ── */}
           {recentSessions.length > 0 ? (
@@ -1383,14 +1778,42 @@ const DashboardContent = ({
               </div>
 
               {/* Hand Movement Trajectory */}
-              {selectedGame?.hasCoordinates && (
+              {selectedGameType === "board_drawing" && (
                 <div>
                   <div className="flex items-center gap-2 mb-3">
                     <div className="w-1 h-6 rounded-full" style={{ backgroundColor: selectedGame.accent }}></div>
-                    <h3 className="text-base font-bold text-gray-800 dark:text-white">Hand Movement Trajectory</h3>
+                    <h3 className="text-base font-bold text-gray-800 dark:text-white">Board Drawing Trajectory Replay</h3>
+                    <span className="text-xs text-gray-400 font-medium">— Session {selectedSession + 1}</span>
+                  </div>
+                  <BoardDrawingTrajectoryReplay attempts={selectedBoardDrawingAttempts} />
+                </div>
+              )}
+
+              {selectedGameType !== "board_drawing" && (selectedGame?.hasCoordinates || (selectedGameType === "type1" && pianoSubTab === "ankle")) && selectedCoordinates.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className="w-1 h-6 rounded-full" style={{ backgroundColor: selectedGame.accent }}></div>
+                    <h3 className="text-base font-bold text-gray-800 dark:text-white">Hand/Cursor Movement Trajectory</h3>
                     <span className="text-xs text-gray-400 font-medium">— Session {selectedSession + 1}</span>
                   </div>
                   <CoordinateVisualizer coordinates={selectedCoordinates} />
+                </div>
+              )}
+              
+              {/* Piano Reaction Game Modes Analytics */}
+              {selectedGameType === "type1" && pianoSubTab === "finger" && (
+                <div>
+                  <div className="flex items-center gap-2 mb-3 mt-6">
+                    <div className="w-1 h-6 rounded-full" style={{ backgroundColor: selectedGame.accent }}></div>
+                    <h3 className="text-base font-bold text-gray-800 dark:text-white">
+                      {selectedSessionData?.session?.mode === 'mobile' ? 'Mobile Finger Dexterity Analytics' : 'Laptop Movement Analytics'}
+                    </h3>
+                    <span className="text-xs text-gray-400 font-medium">— Session {selectedSession + 1}</span>
+                  </div>
+                  <PianoReactionGameAnalytics
+                    session={selectedSessionData?.session}
+                    isDarkMode={isDarkMode}
+                  />
                 </div>
               )}
             </div>
@@ -1603,7 +2026,7 @@ const DashboardContent = ({
             </div>
 
             {/* Next Reminder */}
-            <div className="premium-card p-5">
+            {/* <div className="premium-card p-5">
               <h3 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">Next Reminder</h3>
               {activeReminders.length > 0 ? (
                 <div>
@@ -1634,7 +2057,7 @@ const DashboardContent = ({
                   <p className="text-sm text-gray-400 font-medium">All done for today!</p>
                 </div>
               )}
-            </div>
+            </div> */}
 
             {/* All Reminders */}
             <div className="premium-card p-5">
