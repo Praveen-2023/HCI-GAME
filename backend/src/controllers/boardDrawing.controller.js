@@ -1,5 +1,5 @@
 const User = require('../models/user.model');
-const GameSession = require('../models/gameSession.model');
+const BoardDrawingSession = require('../models/boardDrawingSession.model');
 
 const toNumber = (value, fallback = undefined) => {
   const number = Number(value);
@@ -100,7 +100,7 @@ exports.saveBoardDrawingSession = async (req, res) => {
           .filter((attempt) => attempt.drawnPath.length > 1)
       : [];
 
-    const newSession = new GameSession({
+    const newSession = new BoardDrawingSession({
       user: userId,
       gameType: 'board_drawing',
       gameName: gameName || 'Board Drawing',
@@ -141,7 +141,7 @@ exports.saveBoardDrawingSession = async (req, res) => {
 exports.getBoardDrawingSessions = async (req, res) => {
   try {
     const userId = req.params.userId || req.user.id;
-    const sessions = await GameSession.find({
+    const sessions = await BoardDrawingSession.find({
       user: userId,
       gameType: 'board_drawing'
     }).sort({ time: -1 });

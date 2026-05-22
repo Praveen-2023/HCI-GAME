@@ -1,0 +1,64 @@
+const mongoose = require('mongoose');
+
+const coordinateSchema = new mongoose.Schema({
+  x: Number,
+  y: Number,
+  screenX: Number,
+  screenY: Number,
+  timestamp: Number
+}, { _id: false });
+
+const boardDrawingAttemptSchema = new mongoose.Schema({
+  attemptNumber: { type: Number },
+  requestedShape: { type: String },
+  shapeType: { type: String },
+  hand: { type: String },
+  startedAt: { type: Number },
+  endedAt: { type: Number },
+  canvasWidth: { type: Number },
+  canvasHeight: { type: Number },
+  targetPath: [coordinateSchema],
+  drawnPath: [coordinateSchema],
+  pathMatrix: [[Number]],
+  hits: { type: Number },
+  total: { type: Number },
+  completion: { type: Number },
+  success: { type: Boolean },
+  scoreAfter: { type: Number }
+}, { _id: false });
+
+const playEntrySchema = new mongoose.Schema({
+  responsetime: { type: Number },
+  correct: { type: Number },
+  score: { type: Number },
+  accuracy: { type: Number },
+  attempts: { type: Number },
+  successes: { type: Number },
+  eventName: { type: String },
+  shapeType: { type: String },
+  hand: { type: String }
+}, { _id: false });
+
+const systemMetricsSchema = new mongoose.Schema({
+  avgFps: { type: Number },
+  avgLatency: { type: Number },
+  userAgent: { type: String },
+  resolution: { type: String }
+}, { _id: false });
+
+const boardDrawingSessionSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  gameType: { type: String, required: true, default: 'board_drawing', index: true },
+  gameName: { type: String, required: true, default: 'Board Drawing' },
+  time: { type: Date, default: Date.now, required: true },
+  sessionScore: { type: Number },
+  
+  systemMetrics: systemMetricsSchema,
+  
+  coordinates: [coordinateSchema],
+  boardDrawingAttempts: [boardDrawingAttemptSchema],
+  play: [playEntrySchema],
+  mode: { type: String, enum: ['laptop', 'mobile'], default: 'laptop' }
+}, { timestamps: true });
+
+module.exports = mongoose.model('BoardDrawingSession', boardDrawingSessionSchema);

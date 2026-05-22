@@ -6,6 +6,7 @@ import { useAuth } from "../../../context/AuthContext";
 import gameSessionBuffer from "../../../services/gameSessionBuffer";
 import SaveExitButton from "../SaveExitButton";
 import { COORD_SAMPLE_INTERVAL_MS, MAX_COORDS_PER_SESSION } from "../../../constants";
+import * as GameStorage from "./gameStorage";
 // ==================== CONFIGURATION ====================
 const CONFIG = {
   SESSION_SECONDS: 300,
@@ -165,6 +166,10 @@ const BoardDrawingGame = () => {
   const [rightHandClosed, setRightHandClosed] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [debugInfo, setDebugInfo] = useState("");
+  const [showAnalyticsBtn, setShowAnalyticsBtn] = useState(false);
+
+  // Local storage game id ref
+  const localGameIdRef = useRef(null);
 
   // Refs
   const videoRef = useRef(null);
@@ -383,6 +388,11 @@ const BoardDrawingGame = () => {
   }, []);
   const persistBoardDrawingBuffer = useCallback(() => {
     gameSessionBuffer.update(buildBufferedSessionData());
+    // Also persist latest attempt to local storage
+    if (localGameIdRef.current && boardDrawingAttemptsRef.current.length > 0) {
+      const latest = boardDrawingAttemptsRef.current[boardDrawingAttemptsRef.current.length - 1];
+      GameStorage.recordTry(localGameIdRef.current, latest);
+    }
   }, [buildBufferedSessionData]);
   const finalizeActiveDrawingAttempt = useCallback(() => {
     const shape = shapeRef.current;
@@ -457,6 +467,10 @@ const BoardDrawingGame = () => {
       num_points: shapeRef.current.points.length,
       score: scoreRef.current,
     });
+    // Keep local storage bgCoordinates in sync with current shape
+    if (localGameIdRef.current) {
+      GameStorage.updateBgCoordinates(localGameIdRef.current, shapeRef.current.points);
+    }
   }, [pickNewShape, nowSec]);
 
   // ==================== MEDIAPIPE HANDLERS ====================
@@ -688,8 +702,10 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     const shape = shapeRef.current;
     ["Left", "Right"].forEach((label) => {
       const hand = handState[label];
-      if (!hand.smoothPos || !hand.visible) return;
+      const isDrawing = shape.drawingHand === label;
+      if (!hand.smoothPos || (!hand.visible && !isDrawing)) return;
       const pos = hand.smoothPos;
+      const isClosed = hand.visible && hand.closed;
       
       // Track downsampled coordinates for relative hand trajectory visualization
       if (sessionStartRef.current && Date.now() - lastCoordTimeRef.current > COORD_SAMPLE_INTERVAL_MS) {
@@ -703,10 +719,9 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         lastCoordTimeRef.current = Date.now();
       }
 
-      const isDrawing = shape.drawingHand === label;
       if (
         !shape.drawingHand &&
-        hand.closed &&
+        isClosed &&
         drawnPathRef.current.length === 0
       ) {
         shape.drawingHand = label;
@@ -729,7 +744,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           1500,
         );
       } else if (isDrawing) {
-        if (hand.closed) {
+        if (isClosed) {
           const tracedPoint = makeTracePoint(pos);
           drawnPathRef.current.push(tracedPoint);
           // Advance targets if close
@@ -1293,6 +1308,10 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     setSuccessRate(0);
     setIsSessionActive(true);
 
+    // Start a local storage game record
+    localGameIdRef.current = GameStorage.startGame(shapeRef.current?.points ?? []);
+    setShowAnalyticsBtn(false);
+
     timerIntervalRef.current = setInterval(() => {
       const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 1000);
       const remaining = Math.max(0, CONFIG.SESSION_SECONDS - elapsed);
@@ -1328,6 +1347,17 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         : 0;
 
     persistBoardDrawingBuffer();
+
+    // Finalize local storage game record
+    if (localGameIdRef.current) {
+      GameStorage.finalizeGame(localGameIdRef.current, {
+        score: scoreRef.current,
+        reps,
+        successRate: parseFloat(successRateVal),
+        currentShapePoints: shapeRef.current?.points ?? [],
+      });
+      setShowAnalyticsBtn(true);
+    }
 
     try {
       await gameSessionBuffer.saveAndExit();
@@ -1571,6 +1601,10 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             <div style={themeStyles.statValue}>{Math.round(successRate)}%</div>
           </div>
           <div style={themeStyles.statItem}>
+            <div style={themeStyles.statLabel}>Shapes Done</div>
+            <div style={themeStyles.statValue}>{reps}</div>
+          </div>
+          <div style={themeStyles.statItem}>
             <div style={themeStyles.statLabel}>Session Timer</div>
             <div style={themeStyles.statValue}>{formatTime(timeRemaining)}</div>
           </div>
@@ -1594,6 +1628,37 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             Reset
           </button>
         </div>
+
+        {showAnalyticsBtn && (
+          <button
+            onClick={() => {
+              // Open analytics in a new tab passing the game id
+              const url = `/analytics?gameId=${localGameIdRef.current}`;
+              window.open(url, '_blank');
+            }}
+            style={{
+              ...styles.controlButton,
+              marginTop: '10px',
+              background: '#1565c0',
+              width: '100%',
+            }}
+          >
+            📊 View Game Analytics
+          </button>
+        )}
+
+        <button
+          onClick={() => window.open('/analytics', '_blank')}
+          style={{
+            ...themeStyles.actionButton,
+            marginTop: '8px',
+            width: '100%',
+            fontSize: '12px',
+            padding: '7px',
+          }}
+        >
+          🗂 All Games History
+        </button>
 
         <div style={themeStyles.note}>
           <strong style={themeStyles.statValue}>Clinical Focus:</strong> Fine

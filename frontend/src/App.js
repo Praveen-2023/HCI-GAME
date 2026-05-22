@@ -30,12 +30,14 @@ import ProtectedRoute from "./components/common/ProtectedRoute";
 import CreatePatientForm from "./components/admin/CreatePatientForm";
 import DoctorProfileForm from "./pages/doctor/DoctorProfileForm";
 import PatientSetting from "./pages/patient/PatientSetting";
+import GameAnalytics from "./pages/game/BoardDrawingGame/GameAnalytics";
 
 function App() {
   return (
     <AuthProvider>
       <Router>
         <Routes>
+          <Route path="/analytics" element={<GameAnalytics />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />

@@ -1,5 +1,6 @@
 const User = require('../models/user.model');
 const GameSession = require('../models/gameSession.model');
+const BoardDrawingSession = require('../models/boardDrawingSession.model');
 
 const toNumber = (value, fallback = undefined) => {
   const number = Number(value);
@@ -253,7 +254,9 @@ exports.getDetailedAnalytics = async (req, res) => {
       });
     }
 
-    const sessions = await GameSession.find({ user: userId }).sort({ time: 1 });
+    const gameSessions = await GameSession.find({ user: userId });
+    const boardSessions = await BoardDrawingSession.find({ user: userId });
+    const sessions = [...gameSessions, ...boardSessions].sort((a, b) => new Date(a.time) - new Date(b.time));
     
     // Group by game type
     const grouped = sessions.reduce((acc, session) => {
@@ -380,7 +383,9 @@ exports.getBasicStats = async (req, res) => {
       });
     }
 
-    const sessions = await GameSession.find({ user: userId }).sort({ time: 1 });
+    const gameSessions = await GameSession.find({ user: userId });
+    const boardSessions = await BoardDrawingSession.find({ user: userId });
+    const sessions = [...gameSessions, ...boardSessions].sort((a, b) => new Date(a.time) - new Date(b.time));
     
     // Group by game type
     const grouped = sessions.reduce((acc, session) => {
