@@ -29,6 +29,11 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import thumbImage from "../../assets/hands/hand_thumb_active_1779432908101.png";
+import indexImage from "../../assets/hands/hand_index_active_1779432920829.png";
+import middleImage from "../../assets/hands/hand_middle_active_1779432935604.png";
+import ringImage from "../../assets/hands/hand_ring_active_1779432950085.png";
+import pinkyImage from "../../assets/hands/hand_pinky_active_1779432966168.png";
 
 const CoordinateVisualizer = ({ coordinates }) => {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -72,7 +77,7 @@ const CoordinateVisualizer = ({ coordinates }) => {
 
   if (validCoords.length === 0) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 border border-gray-150 dark:border-gray-700 text-center mt-6 shadow-sm">
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-8 border border-gray-150 dark:border-gray-700 text-center mt-6 shadow-sm">
         <div className="mb-3 text-5xl">🖐️</div>
         <p className="font-bold text-gray-800 dark:text-gray-200 mb-1 text-lg">No Movement Data Yet</p>
         <p className="text-sm text-gray-400 max-w-md mx-auto leading-relaxed">
@@ -113,7 +118,7 @@ const CoordinateVisualizer = ({ coordinates }) => {
   const jitterScore = speeds.length > 1 ? (jitterSum / (speeds.length - 1)) * 100 : 0;
 
   return (
-    <div className="bg-white dark:bg-gray-850 rounded-3xl p-6 border border-gray-150 dark:border-gray-800 mt-4 shadow-sm transition-all duration-300">
+    <div className="bg-white dark:bg-gray-850 rounded-xl p-6 border border-gray-150 dark:border-gray-800 mt-4 shadow-sm transition-all duration-300">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b dark:border-gray-800 pb-4">
         <div>
           <h3 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-secondary-600 dark:from-primary-400 dark:to-secondary-400">
@@ -546,14 +551,14 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
     return (
       <div className="space-y-6 mt-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
             <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Total Pixel Distance Moved</p>
             <p className="text-3xl font-black text-primary-600 dark:text-primary-400">
               {totalDistance.toFixed(1)} px
             </p>
             <p className="text-xs text-gray-400 mt-1">Sum of physical movement deltas between keys</p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
             <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Avg Transition Distance</p>
             <p className="text-3xl font-black text-secondary-600 dark:text-secondary-400">
               {avgDistance.toFixed(1)} px
@@ -562,7 +567,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
           <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Wrist/Arm Movement Vector Trajectory</h3>
           <p className="text-xs text-gray-400 mb-4">Sequential coordinate path mapping response targets in absolute pixel coordinates.</p>
           <LaptopMovementVisualizer movements={laptopMovements} isDarkMode={isDarkMode} />
@@ -571,7 +576,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
     );
   } else {
     const fingerKeys = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-    const fingerEmojis = { thumb: "👍", index: "✍️", middle: "🖐️", ring: "💍", pinky: "🤙" };
+    const fingerImages = { thumb: thumbImage, index: indexImage, middle: middleImage, ring: ringImage, pinky: pinkyImage };
     const fingerNames = { thumb: "Thumb", index: "Index", middle: "Middle", ring: "Ring", pinky: "Pinky" };
 
     const fingerStats = fingerKeys.map(finger => {
@@ -592,7 +597,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
       return {
         finger,
         name: fingerNames[finger],
-        emoji: fingerEmojis[finger],
+        image: fingerImages[finger],
         total,
         correct,
         incorrect,
@@ -606,10 +611,15 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
       <div className="space-y-6 mt-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           {fingerStats.map(f => (
-            <div key={f.finger} className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-150 dark:border-gray-700 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-2xl">{f.emoji}</span>
-                <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-lg text-[10px] font-bold">
+            <div key={f.finger} className="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden">
+              <div className="absolute -right-4 -top-4 w-20 h-20 opacity-10 grayscale hover:grayscale-0 transition-all duration-300 pointer-events-none">
+                 <img src={f.image} alt={f.name} className="w-full h-full object-contain" />
+              </div>
+              <div className="flex items-center justify-between mb-4 relative z-10">
+                <div className="w-10 h-10 p-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg flex items-center justify-center">
+                  <img src={f.image} alt={f.name} className="w-full h-full object-contain" />
+                </div>
+                <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded-lg text-xs font-semibold">
                   Limit: {f.timeout}s
                 </span>
               </div>
@@ -630,7 +640,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
           ))}
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
           <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Finger Dexterity Profile</h3>
           <p className="text-xs text-gray-400 mb-4">Response times and accuracy compared across active fingers.</p>
           <div className="h-64">
@@ -977,7 +987,7 @@ const PatientAnalytics = () => {
     >
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 mb-6 border dark:border-gray-800">
+        <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 mb-6 border dark:border-gray-800">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
             <button
               onClick={() => navigate("/doctor/dashboard")}
@@ -1068,7 +1078,7 @@ const PatientAnalytics = () => {
         )}
 
         {sessions.length === 0 ? (
-          <div className="text-center py-24 bg-white dark:bg-gray-900 rounded-3xl border border-gray-100 dark:border-gray-800 shadow-sm">
+          <div className="text-center py-24 bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm">
             <div className="text-7xl mb-4">{selectedGame?.icon}</div>
             <p className="text-xl font-bold text-gray-400 mb-2">No sessions recorded yet</p>
             <p className="text-gray-500 max-w-sm mx-auto">This patient has not played {selectedGame?.name} yet.</p>
@@ -1127,7 +1137,7 @@ const PatientAnalytics = () => {
             {/* Charts Row 1 */}
             <div className="grid lg:grid-cols-2 gap-8 mb-8">
               {/* Scatter Plot */}
-              <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800">
+              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800">
                 <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
                   Response Time Analysis
                 </h2>
@@ -1185,7 +1195,7 @@ const PatientAnalytics = () => {
               </div>
 
               {/* Bar Chart */}
-              <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800">
+              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800">
                 <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
                   Session Performance
                 </h2>
@@ -1223,7 +1233,7 @@ const PatientAnalytics = () => {
 
             {/* Charts Row 2 */}
             <div className="grid lg:grid-cols-2 gap-8 mb-8">
-              <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800">
+              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800">
                 <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
                   Overall Distribution
                 </h2>
@@ -1257,7 +1267,7 @@ const PatientAnalytics = () => {
                 </div>
               </div>
 
-              <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800">
+              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800">
                 <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
                   Response Time Trend
                 </h2>
@@ -1304,7 +1314,7 @@ const PatientAnalytics = () => {
             </div>
 
             {/* Detailed Session Replay and Analysis */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800 mb-8">
+            <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800 mb-8">
               <div className="flex flex-wrap items-center justify-between gap-3 mb-6 border-b dark:border-gray-800 pb-4">
                 <div>
                   <h2 className="text-2xl font-black text-gray-800 dark:text-white tracking-tight">
@@ -1383,7 +1393,7 @@ const PatientAnalytics = () => {
             </div>
 
             {/* Session History Table */}
-            <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800">
+            <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800">
               <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-6 tracking-tight">
                 Session History
               </h2>
@@ -1482,7 +1492,7 @@ const PatientAnalytics = () => {
         {/* Level Span Update Modal */}
         {showLevelSpanModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-8 max-w-md w-full shadow-2xl border dark:border-gray-800">
+            <div className="bg-white dark:bg-gray-900 rounded-xl p-8 max-w-md w-full shadow-2xl border dark:border-gray-800">
               <h3 className="text-2xl font-black text-gray-800 dark:text-white mb-4 tracking-tight">
                 Update Level Span
               </h3>

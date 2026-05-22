@@ -273,7 +273,7 @@ const MainDashboardView = ({
   };
 
   const StatCard = ({ title, value, icon: Icon, color, trend }) => (
-    <div className="bg-white dark:bg-gray-900 p-8 rounded-[2.5rem] shadow-sm border border-transparent dark:border-gray-800/50 group hover:border-primary-500/30 transition-all duration-500">
+    <div className="bg-white dark:bg-gray-900 p-8 rounded-xl shadow-sm border border-transparent dark:border-gray-800/50 group hover:border-primary-500/30 transition-all duration-500">
       <div className="flex justify-between items-start mb-6">
         <div
           className="p-4 rounded-2xl"
@@ -358,7 +358,7 @@ const MainDashboardView = ({
 
       {/* Create User Form */}
       {showCreateForm && (
-        <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] p-10 shadow-xl border border-transparent dark:border-gray-800/50 animate-in fade-in slide-in-from-top-4 duration-500">
+        <div className="bg-white dark:bg-gray-900 rounded-xl p-10 shadow-xl border border-transparent dark:border-gray-800/50 animate-in fade-in slide-in-from-top-4 duration-500">
           <div className="flex items-center gap-4 mb-8">
             <div className="p-3 bg-primary-100 dark:bg-primary-900/30 rounded-2xl">
               <UserPlus className="w-6 h-6 text-primary-500" />
@@ -511,7 +511,7 @@ const CaretakerView = ({ patients, caretakers, isDarkMode }) => (
       isDarkMode={isDarkMode}
     />
 
-    <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] p-10 shadow-xl border border-transparent dark:border-gray-800/50">
+    <div className="bg-white dark:bg-gray-900 rounded-xl p-10 shadow-xl border border-transparent dark:border-gray-800/50">
       <div className="flex items-center gap-4 mb-10">
         <div className="p-3 bg-primary-100 dark:bg-primary-900/30 rounded-2xl">
           <Users className="w-6 h-6 text-primary-500" />
@@ -656,7 +656,7 @@ const AssignPatientForm = ({ patients, caretakers, isDarkMode }) => {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] p-10 shadow-xl border border-transparent dark:border-gray-800/50">
+    <div className="bg-white dark:bg-gray-900 rounded-xl p-10 shadow-xl border border-transparent dark:border-gray-800/50">
       <div className="flex items-center gap-4 mb-8">
         <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-2xl">
           <UserPlus className="w-6 h-6 text-blue-500" />
@@ -727,7 +727,7 @@ const PatientList = ({ patients, isDarkMode }) => {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] p-10 shadow-xl border border-transparent dark:border-gray-800/50 mt-10">
+    <div className="bg-white dark:bg-gray-900 rounded-xl p-10 shadow-xl border border-transparent dark:border-gray-800/50 mt-10">
       <div className="flex items-center gap-4 mb-10">
         <div className="p-3 bg-purple-100 dark:bg-purple-900/30 rounded-2xl">
           <Activity className="w-6 h-6 text-purple-500" />
@@ -835,7 +835,7 @@ const QuickReminders = ({ patients, isDarkMode }) => {
   };
 
   return (
-    <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] p-10 shadow-xl border border-transparent dark:border-gray-800/50 mt-10">
+    <div className="bg-white dark:bg-gray-900 rounded-xl p-10 shadow-xl border border-transparent dark:border-gray-800/50 mt-10">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
         <div>
           <h2 className="text-3xl font-black dark:text-white tracking-tight flex items-center gap-3">
@@ -970,7 +970,7 @@ const QuickReminders = ({ patients, isDarkMode }) => {
             </div>
           ))}
           {reminders.length === 0 && (
-            <div className="col-span-full py-16 text-center border-2 border-dashed border-gray-100 dark:border-gray-800 rounded-[2.5rem]">
+            <div className="col-span-full py-16 text-center border-2 border-dashed border-gray-100 dark:border-gray-800 rounded-xl">
               <Bell className="w-12 h-12 text-gray-200 dark:text-gray-700 mx-auto mb-3" />
               <p className="text-gray-400 dark:text-gray-500 font-bold">
                 Select a patient to see their active reminders

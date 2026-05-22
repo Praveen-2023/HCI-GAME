@@ -43,6 +43,13 @@ import {
   Sun,
   Moon,
   Download,
+  Music,
+  ThumbsUp,
+  PenTool,
+  Hand,
+  Circle,
+  Info,
+  Star
 } from "lucide-react";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
@@ -435,15 +442,15 @@ const CoordinateVisualizer = ({ coordinates }) => {
 
   if (validCoords.length === 0) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 border border-gray-100 dark:border-gray-700 text-center mt-6 shadow-sm">
-        <div className="mb-3 text-5xl">🖐️</div>
-        <p className="font-bold text-gray-800 dark:text-gray-200 mb-1 text-lg">No Movement Data Yet</p>
+      <div className="bg-white dark:bg-slate-800 rounded-xl p-8 border border-slate-100 dark:border-slate-700 text-center mt-6 shadow-sm">
+        <div className="mb-3 text-5xl text-slate-300 dark:text-slate-600 flex justify-center"><Activity size={48} /></div>
+        <p className="font-semibold text-slate-800 dark:text-slate-200 mb-1 text-lg">No Movement Data Yet</p>
         <p className="text-sm text-gray-400 max-w-md mx-auto leading-relaxed">
           Hand trajectory is recorded automatically during gameplay. Play a session to see your movement path, velocity profile, and tremor analysis here.
         </p>
-        <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/30 rounded-xl text-amber-700 dark:text-amber-400 text-xs font-bold">
-          <span>ℹ️</span> Coordinates are sampled every second during active sessions
-        </div>
+        <p className="text-xs text-slate-400 mt-6 flex items-center justify-center gap-1">
+          <Info size={14} /> Coordinates are sampled every second during active sessions
+        </p>
       </div>
     );
   }
@@ -482,7 +489,7 @@ const CoordinateVisualizer = ({ coordinates }) => {
   const jitterScore = speeds.length > 1 ? (jitterSum / (speeds.length - 1)) * 100 : 0;
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 mt-6 shadow-md transition-all duration-300">
+    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 mt-6 shadow-md transition-all duration-300">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b dark:border-gray-700 pb-4">
         <div>
           <h3 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-secondary-600 dark:from-primary-400 dark:to-secondary-400">
@@ -1285,14 +1292,14 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
       <div className="space-y-6 mt-4">
         {/* Laptop Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
             <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Total Pixel Distance Moved</p>
             <p className="text-3xl font-black text-primary-600 dark:text-primary-400">
               {totalDistance.toFixed(1)} px
             </p>
             <p className="text-xs text-gray-400 mt-1">Sum of physical movement deltas between keys</p>
           </div>
-          <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
             <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Avg Transition Distance</p>
             <p className="text-3xl font-black text-secondary-600 dark:text-secondary-400">
               {avgDistance.toFixed(1)} px
@@ -1302,7 +1309,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
         </div>
 
         {/* Laptop Visualizer */}
-        <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
           <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Wrist/Arm Movement Vector Trajectory</h3>
           <p className="text-xs text-gray-400 mb-4">Sequential coordinate path mapping response targets in absolute pixel coordinates.</p>
           <FingerClickVisualizer fingerTimeouts={session?.fingerTimeouts} movements={mobileMovements} isDarkMode={isDarkMode} />
@@ -1311,7 +1318,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
     );
   } else {
     const fingerKeys = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-    const fingerEmojis = { thumb: "👍", index: "✍️", middle: "🖐️", ring: "💍", pinky: "🤙" };
+    const fingerIcons = { thumb: <ThumbsUp size={16} />, index: <PenTool size={16} />, middle: <Hand size={16} />, ring: <Circle size={16} />, pinky: <Hand size={16} /> };
     const fingerNames = { thumb: "Thumb", index: "Index", middle: "Middle", ring: "Ring", pinky: "Pinky" };
 
     const fingerStats = fingerKeys.map(finger => {
@@ -1332,7 +1339,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
       return {
         finger,
         name: fingerNames[finger],
-        emoji: fingerEmojis[finger],
+        icon: fingerIcons[finger],
         total,
         correct,
         incorrect,
@@ -1347,9 +1354,9 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
         {/* Mobile Stats Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
           {fingerStats.map(f => (
-            <div key={f.finger} className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-150 dark:border-gray-700 shadow-sm">
+            <div key={f.finger} className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-150 dark:border-gray-700 shadow-sm">
               <div className="flex items-center justify-between mb-3">
-                <span className="text-2xl">{f.emoji}</span>
+                <span className="text-lg text-primary-500">{f.icon}</span>
                 <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-lg text-[10px] font-bold">
                   Limit: {f.timeout}s
                 </span>
@@ -1372,7 +1379,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
         </div>
 
         {/* Comparison Chart */}
-        <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
           <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Finger Dexterity Profile</h3>
           <p className="text-xs text-gray-400 mb-4">Response times and accuracy compared across active fingers.</p>
           <div className="h-64">
@@ -1404,7 +1411,7 @@ const GAMES_LIST = [
     desc: "Tests and improves cognitive reaction speeds by tapping highlighted piano keys in response to stimuli.",
     clinicalFocus: "Cognitive processing speed, manual dexterity, and hand-eye coordination.",
     hasCoordinates: false,
-    icon: "🎹",
+    icon: <Music className="w-12 h-12 text-white" />,
     color: "from-violet-700 to-indigo-800",
     accent: "#7C3AED",
   },
@@ -1415,7 +1422,7 @@ const GAMES_LIST = [
     desc: "Traces complex board paths to evaluate distal hand movements, precision, and tremor control.",
     clinicalFocus: "Fine motor control, hand tremor reduction, and continuous movement precision.",
     hasCoordinates: false,
-    icon: "✏️",
+    icon: <Edit3 className="w-12 h-12 text-white" />,
     color: "from-blue-700 to-cyan-800",
     accent: "#2563EB",
   },
@@ -1426,7 +1433,7 @@ const GAMES_LIST = [
     desc: "Grasp and move falling fruits into a basket using full arm gestures to improve range of motion.",
     clinicalFocus: "Gross motor coordination, shoulder/elbow articulation, and spatial reaching velocity.",
     hasCoordinates: true,
-    icon: "🍎",
+    icon: <Target className="w-12 h-12 text-white" />,
     color: "from-orange-600 to-amber-700",
     accent: "#EA580C",
   },
@@ -1858,14 +1865,14 @@ const DashboardContent = ({
         <div className="space-y-0">
 
           {/* ── Hero Banner ── */}
-          <div className={`bg-gradient-to-br ${selectedGame?.color || 'from-gray-700 to-gray-800'} rounded-3xl p-8 mb-6 relative overflow-hidden`}>
+          <div className={`bg-gradient-to-br ${selectedGame?.color || 'from-gray-700 to-gray-800'} rounded-xl p-8 mb-6 relative overflow-hidden`}>
             {/* Decorative blobs */}
             <div className="absolute -right-12 -top-12 w-48 h-48 bg-white/5 rounded-full" />
             <div className="absolute -right-4 -bottom-8 w-32 h-32 bg-white/5 rounded-full" />
 
             <div className="relative z-10 flex flex-wrap items-start justify-between gap-6">
               <div className="flex items-center gap-5">
-                <div className="w-20 h-20 bg-white/10 backdrop-blur-sm rounded-3xl flex items-center justify-center text-5xl shadow-xl border border-white/20">
+                <div className="w-20 h-20 bg-white/10 backdrop-blur-sm rounded-xl flex items-center justify-center text-5xl shadow-xl border border-white/20">
                   {selectedGame?.icon}
                 </div>
                 <div>
@@ -1942,26 +1949,26 @@ const DashboardContent = ({
           {selectedGameType === "type1" && (
             <div className="flex gap-2 p-1.5 bg-gray-100/80 dark:bg-gray-950/40 backdrop-blur-md rounded-2xl border border-gray-200/50 dark:border-gray-800/50 mb-6 max-w-md">
               <button
-                onClick={() => { setPianoSubTab("finger"); setSelectedSession(0); }}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all duration-300 ${
-                  pianoSubTab === "finger"
-                    ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/10'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                className={`flex-1 py-3 px-4 font-semibold text-sm transition-colors border-b-2 flex justify-center items-center gap-2 ${
+                  pianoSubTab === 'finger'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
+                onClick={() => setPianoSubTab('finger')}
               >
-                <span>🖐️</span>
-                <span>Finger Dexterity</span>
+                <Activity size={18} />
+                Finger Tracking
               </button>
               <button
-                onClick={() => { setPianoSubTab("ankle"); setSelectedSession(0); }}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all duration-300 ${
-                  pianoSubTab === "ankle"
-                    ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/10'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
-              }`}
+                className={`flex-1 py-3 px-4 font-semibold text-sm transition-colors border-b-2 flex justify-center items-center gap-2 ${
+                  pianoSubTab === 'ankle'
+                    ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                    : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+                onClick={() => setPianoSubTab('ankle')}
               >
-                <span>⌚</span>
-                <span>Wrist Movement</span>
+                <Clock size={18} />
+                Wrist Tracking
               </button>
             </div>
           )}
@@ -1971,7 +1978,7 @@ const DashboardContent = ({
             <div className="space-y-6">
 
               {/* Accuracy & Response Time */}
-              <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
+              <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
                 <div className="flex items-center justify-between mb-5">
                   <div>
                     <h3 className="text-base font-bold text-gray-800 dark:text-white">Accuracy &amp; Response Time</h3>
@@ -1999,7 +2006,7 @@ const DashboardContent = ({
 
               {/* Performance + Daily Progress side by side */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
                   <div className="flex items-center gap-2 mb-5">
                     <div className="w-8 h-8 bg-primary-50 dark:bg-primary-900/20 rounded-xl flex items-center justify-center">
                       <Activity className="w-4 h-4 text-primary-500" />
@@ -2027,7 +2034,7 @@ const DashboardContent = ({
                   </div>
                 </div>
 
-                <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
                   <div className="flex items-center gap-2 mb-5">
                     <div className="w-8 h-8 bg-secondary-50 dark:bg-secondary-900/20 rounded-xl flex items-center justify-center">
                       <TrendingUp className="w-4 h-4 text-secondary-500" />
@@ -2057,7 +2064,7 @@ const DashboardContent = ({
               </div>
 
               {/* Session Play-by-Play */}
-              <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
+              <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
                   <div>
                     <h3 className="text-base font-bold text-gray-800 dark:text-white">Session Replay</h3>
@@ -2114,9 +2121,9 @@ const DashboardContent = ({
                     )}
                   </div>
                 ) : (
-                  <div className="text-center py-10">
-                    <p className="text-4xl mb-2">📭</p>
-                    <p className="text-gray-400 font-medium text-sm">No per-attempt telemetry for this session.</p>
+                  <div className="text-center py-10 bg-slate-50/50 dark:bg-slate-800/50 rounded-xl border border-dashed border-slate-200 dark:border-slate-700">
+                    <div className="flex justify-center mb-2 text-slate-300 dark:text-slate-600"><Target size={32} /></div>
+                    <p className="text-slate-500 dark:text-slate-400 font-semibold text-sm">No recent sessions available</p>
                   </div>
                 )}
               </div>
@@ -2150,7 +2157,7 @@ const DashboardContent = ({
               
               {/* Laptop Visualizer */}
               {selectedGameType !== "board_drawing" && (selectedGame?.hasCoordinates || (selectedGameType === "type1" && pianoSubTab === "ankle")) && selectedCoordinates.length > 0 && (
-                <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+                <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
                   <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Wrist/Arm Movement Vector Trajectory</h3>
                   <p className="text-xs text-gray-400 mb-4">Sequential coordinate path mapping response targets in absolute pixel coordinates.</p>
                   <LaptopMovementVisualizer movements={selectedSessionData?.session?.laptopMovements} isDarkMode={isDarkMode} />
@@ -2175,7 +2182,7 @@ const DashboardContent = ({
               )}
             </div>
           ) : (
-            <div className="text-center py-24 bg-white dark:bg-gray-800 rounded-3xl border border-gray-100 dark:border-gray-700">
+            <div className="text-center py-24 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700">
               <div className="text-7xl mb-4">{selectedGame?.icon}</div>
               <p className="text-xl font-bold text-gray-400 mb-2">No sessions recorded yet</p>
               <p className="text-gray-500 mb-8 max-w-sm mx-auto">Play {selectedGame?.name} to start tracking your therapy progress and see your stats here.</p>
@@ -2201,59 +2208,63 @@ const DashboardContent = ({
             {/* Greeting Row */}
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
-                <h1 className="text-3xl font-black text-gray-900 dark:text-white">
-                  Hello, {userData?.name?.split(' ')[0] || 'there'}! 👋
+                <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
+                  Hello, {userData?.name?.split(' ')[0] || 'there'}
                 </h1>
-                <p className="text-gray-500 dark:text-gray-400 mt-1 font-medium">You're doing great! Let's keep it up.</p>
+                <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium text-lg">Your clinical overview for today.</p>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2.5 px-4 py-2.5 bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-800/30 rounded-2xl">
-                  <span className="text-2xl">🔥</span>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3 px-5 py-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 rounded-xl">
+                  <Activity className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                   <div>
-                    <p className="text-xl font-black text-orange-600 dark:text-orange-400 leading-none">{currentStreak}</p>
-                    <p className="text-[9px] font-black uppercase tracking-widest text-orange-400">Day Streak</p>
+                    <p className="text-xl font-bold text-blue-800 dark:text-blue-300 leading-none">{currentStreak}</p>
+                    <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">Day Streak</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2.5 px-4 py-2.5 bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800/30 rounded-2xl">
-                  <span className="text-2xl">⭐</span>
+                <div className="flex items-center gap-3 px-5 py-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30 rounded-xl">
+                  <Target className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
                   <div>
-                    <p className="text-xl font-black text-green-600 dark:text-green-400 leading-none">{stats?.totalScore || 0}</p>
-                    <p className="text-[9px] font-black uppercase tracking-widest text-green-400">Points</p>
+                    <p className="text-xl font-bold text-emerald-800 dark:text-emerald-300 leading-none">{stats?.totalScore || 0}</p>
+                    <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Points</p>
                   </div>
                 </div>
               </div>
             </div>
 
             {/* Summary Cards Row */}
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-6">
               {/* Daily Goal */}
-              <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
-                <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-3">Daily Goal</p>
-                <p className="text-4xl font-black text-gray-900 dark:text-white">
-                  {todaySessionsCount} <span className="text-xl text-gray-300 dark:text-gray-600">/ 3</span>
+              <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
+                <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-3">Daily Goal</p>
+                <p className="text-4xl font-bold text-slate-900 dark:text-white">
+                  {todaySessionsCount} <span className="text-xl text-slate-400 dark:text-slate-500">/ 3</span>
                 </p>
-                <p className="text-[11px] text-gray-400 mt-1 mb-3">Exercises Completed</p>
-                <div className="w-full bg-gray-100 dark:bg-gray-700 rounded-full h-2">
+                <p className="text-sm text-slate-500 mt-1 mb-4">Exercises Completed</p>
+                <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2">
                   <div
-                    className="bg-gradient-to-r from-primary-500 to-primary-400 h-2 rounded-full transition-all duration-500"
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-500"
                     style={{ width: `${Math.min((todaySessionsCount / 3) * 100, 100)}%` }}
                   />
                 </div>
               </div>
 
               {/* Keep Going */}
-              <div className="bg-gradient-to-br from-amber-400 to-orange-500 rounded-3xl p-5 text-white shadow-md shadow-orange-200 dark:shadow-orange-900/20 relative overflow-hidden flex flex-col justify-between">
-                <div className="absolute -right-3 -bottom-3 text-7xl opacity-15 select-none">🏆</div>
-                <p className="text-sm font-bold">Keep Going!</p>
-                <span className="text-4xl">🏆</span>
-                <p className="text-xs font-semibold opacity-90 leading-snug">You're making excellent progress.</p>
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-6 shadow-sm relative overflow-hidden flex flex-col justify-between">
+                <div className="absolute -right-2 -bottom-2 opacity-10 select-none">
+                  <Award className="w-32 h-32 text-blue-600" />
+                </div>
+                <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">Keep Going!</p>
+                <div className="mt-2 mb-2">
+                   <Award className="w-10 h-10 text-blue-600 dark:text-blue-400" />
+                </div>
+                <p className="text-sm font-medium text-blue-700 dark:text-blue-400 leading-snug">Excellent clinical progress.</p>
               </div>
 
               {/* This Week */}
-              <div className="bg-white dark:bg-gray-800 rounded-3xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
-                <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">This Week</p>
-                <p className="text-4xl font-black text-green-500">{weekAccuracyAllGames.toFixed(0)}%</p>
-                <p className="text-[11px] text-gray-400 mt-1 mb-2">Overall Score</p>
+              <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
+                <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1">This Week</p>
+                <p className="text-4xl font-bold text-emerald-600 dark:text-emerald-400">{weekAccuracyAllGames.toFixed(0)}%</p>
+                <p className="text-sm text-slate-500 mt-1 mb-3">Overall Score</p>
                 {isMounted && (
                   <div className="h-10">
                     <ResponsiveContainer width="100%" height="100%">
@@ -2289,38 +2300,40 @@ const DashboardContent = ({
                   return (
                     <div
                       key={game.type}
-                      className="bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 hover:border-primary-500/50 transition-all hover:shadow-xl hover:shadow-primary-500/10 hover:-translate-y-0.5 group"
+                      className="bg-white dark:bg-slate-800 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 hover:border-blue-500/50 transition-colors shadow-sm"
                     >
                       {/* Visual Header */}
-                      <div className={`bg-gradient-to-br ${grad} h-28 flex flex-col items-center justify-center relative`}>
-                        <span className="text-5xl group-hover:scale-110 transition-transform duration-300 drop-shadow-lg">{game.icon}</span>
+                      <div className="bg-slate-50 dark:bg-slate-900/50 h-28 flex flex-col items-center justify-center relative border-b border-slate-100 dark:border-slate-700">
+                        <span className="text-slate-700 dark:text-slate-300">
+                          {React.cloneElement(game.icon, { className: 'w-12 h-12' })}
+                        </span>
                         {playCount > 0 && (
-                          <div className="absolute top-2 right-2 bg-black/40 backdrop-blur-sm text-white text-[9px] font-black px-2 py-0.5 rounded-full">
-                            {playCount}×
+                          <div className="absolute top-3 right-3 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-xs font-semibold px-2 py-1 rounded border border-slate-200 dark:border-slate-700 shadow-sm">
+                            {playCount} Sessions
                           </div>
                         )}
                         {highScore > 0 && (
-                          <div className="absolute bottom-2 left-2 bg-black/40 backdrop-blur-sm text-yellow-300 text-[9px] font-black px-2 py-0.5 rounded-full">
-                            ⭐ {highScore}
+                          <div className="absolute bottom-3 left-3 bg-white dark:bg-slate-800 text-slate-800 dark:text-white text-xs font-semibold px-2 py-1 rounded border border-slate-200 dark:border-slate-700 shadow-sm flex items-center gap-1">
+                            <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" /> {highScore}
                           </div>
                         )}
                       </div>
                       {/* Card Body */}
-                      <div className="p-4">
-                        <h3 className="font-extrabold text-sm text-white mb-1 group-hover:text-primary-400 transition-colors">{game.name}</h3>
-                        <p className="text-[11px] text-gray-400 leading-relaxed line-clamp-2 mb-4">{game.desc}</p>
-                        <div className="space-y-2">
+                      <div className="p-5">
+                        <h3 className="font-bold text-base text-slate-900 dark:text-white mb-2">{game.name}</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 leading-relaxed line-clamp-2 mb-5">{game.desc}</p>
+                        <div className="space-y-3">
                           <button
                             onClick={() => navigate(game.path)}
-                            className="w-full py-2.5 bg-green-500 hover:bg-green-400 text-gray-900 font-black text-sm rounded-xl transition-all active:scale-95"
+                            className="w-full flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg transition-colors"
                           >
-                            ▶ Play
+                            <Play className="w-4 h-4 fill-white" /> Start Exercise
                           </button>
                           <button
                             onClick={() => { setSelectedGameType(game.type); setViewMode("details"); setSelectedSession(0); }}
-                            className="w-full py-1.5 text-xs font-bold text-gray-500 hover:text-white transition-colors"
+                            className="w-full py-2 text-sm font-semibold text-slate-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                           >
-                            View Stats →
+                            View Clinical Stats
                           </button>
                         </div>
                       </div>
@@ -2334,50 +2347,50 @@ const DashboardContent = ({
           {/* ── Right Sidebar ── */}
           <div className="space-y-4">
             {/* Performance Overview */}
-            <div className="premium-card p-5">
-              <h3 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">Performance</h3>
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
+              <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-4">Performance</h3>
               <div className="grid grid-cols-2 gap-3">
-                <div className="bg-primary-50/50 dark:bg-primary-900/10 rounded-2xl p-3 border border-primary-50 dark:border-primary-900/20">
-                  <p className="text-[10px] font-bold text-primary-600 dark:text-primary-400 uppercase tracking-wider mb-1">Level</p>
-                  <p className="text-2xl font-black text-primary-900 dark:text-primary-100">{stats?.level || 1}</p>
+                <div className="bg-blue-50/50 dark:bg-blue-900/10 rounded-xl p-4 border border-blue-100 dark:border-blue-900/20">
+                  <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-1">Level</p>
+                  <p className="text-2xl font-bold text-blue-900 dark:text-blue-100">{stats?.level || 1}</p>
                 </div>
-                <div className="bg-secondary-50/50 dark:bg-secondary-900/10 rounded-2xl p-3 border border-secondary-50 dark:border-secondary-900/20">
-                  <p className="text-[10px] font-bold text-secondary-600 dark:text-secondary-400 uppercase tracking-wider mb-1">Score</p>
-                  <p className="text-2xl font-black text-secondary-900 dark:text-secondary-100">{stats?.totalScore || 0}</p>
+                <div className="bg-emerald-50/50 dark:bg-emerald-900/10 rounded-xl p-4 border border-emerald-100 dark:border-emerald-900/20">
+                  <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mb-1">Score</p>
+                  <p className="text-2xl font-bold text-emerald-900 dark:text-emerald-100">{stats?.totalScore || 0}</p>
                 </div>
-                <div className="bg-green-50/50 dark:bg-green-900/10 rounded-2xl p-3 border border-green-50 dark:border-green-900/20 col-span-2">
-                  <p className="text-[10px] font-bold text-green-600 dark:text-green-400 uppercase tracking-wider mb-1">Total Sessions (All Games)</p>
-                  <p className="text-2xl font-black text-green-900 dark:text-green-100">{totalSessionsAllGames}</p>
+                <div className="bg-slate-50/50 dark:bg-slate-900/10 rounded-xl p-4 border border-slate-100 dark:border-slate-700 col-span-2">
+                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Total Sessions (All Games)</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalSessionsAllGames}</p>
                 </div>
               </div>
             </div>
 
             {/* Your Doctor */}
-            <div className="premium-card p-5">
-              <h3 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">Care Team</h3>
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
+              <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-4">Care Team</h3>
               <div className="flex items-center gap-3 mb-4">
                 <img
                   src="https://via.placeholder.com/40"
-                  className="w-12 h-12 rounded-full ring-2 ring-primary-100 dark:ring-primary-900"
+                  className="w-12 h-12 rounded-full ring-2 ring-blue-100 dark:ring-blue-900"
                   alt="Doctor"
                 />
                 <div>
-                  <p className="text-sm font-bold text-gray-900 dark:text-white">{userData?.doctor?.[0]?.doctorName || "Your Doctor"}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{userData?.doctor?.[0]?.doctorDegree || "Physician"}</p>
+                  <p className="text-sm font-bold text-slate-900 dark:text-white">{userData?.doctor?.[0]?.doctorName || "Your Doctor"}</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{userData?.doctor?.[0]?.doctorDegree || "Physician"}</p>
                 </div>
               </div>
               <div className="flex gap-2">
                 <button
                   onClick={() => navigate("/chat")}
-                  className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-primary-500 hover:bg-primary-600 text-white font-bold text-sm rounded-xl transition-all"
+                  className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm rounded-lg transition-colors"
                 >
-                  <MessageSquare size={14} /> Message
+                  <MessageSquare size={16} /> Message
                 </button>
                 <a
                   href={`tel:${userData?.doctor?.[0]?.doctorphone}`}
-                  className="flex items-center justify-center p-2.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-xl transition-all hover:bg-gray-200 dark:hover:bg-gray-600"
+                  className="flex items-center justify-center p-2.5 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded-lg transition-colors hover:bg-slate-200 dark:hover:bg-slate-600"
                 >
-                  <PhoneCall size={16} />
+                  <PhoneCall size={18} />
                 </a>
               </div>
             </div>
@@ -2417,11 +2430,11 @@ const DashboardContent = ({
             </div> */}
 
             {/* All Reminders */}
-            <div className="premium-card p-5">
-              <div className="flex justify-between items-center mb-3">
-                <h3 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Remind Me</h3>
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400">Remind Me</h3>
                 <select
-                  className="text-sm text-primary-500 bg-transparent border-none focus:outline-none cursor-pointer font-bold"
+                  className="text-sm text-blue-600 bg-transparent border-none focus:outline-none cursor-pointer font-semibold"
                   value={selectedPeriod}
                   onChange={(e) => setSelectedPeriod(e.target.value)}
                 >
@@ -2430,26 +2443,26 @@ const DashboardContent = ({
                   <option value="month">This Month</option>
                 </select>
               </div>
-              <div className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-1.5 mb-3">
+              <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-1.5 mb-4">
                 <div
-                  className="bg-gradient-to-r from-primary-500 to-primary-400 h-1.5 rounded-full transition-all"
+                  className="bg-blue-600 h-1.5 rounded-full transition-all"
                   style={{ width: `${percentage}%` }}
                 />
               </div>
-              <div className="space-y-1 max-h-44 overflow-y-auto">
+              <div className="space-y-2 max-h-44 overflow-y-auto">
                 {activeReminders.map(r => (
                   <ReminderItem key={r._id} reminder={r} onEdit={() => setEditingReminder(r)} onMarkDone={handleMarkDone} />
                 ))}
                 {completedReminders.length > 0 && (
-                  <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2 px-2">Completed</p>
+                  <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                    <p className="text-xs font-semibold text-slate-400 mb-2 px-2">Completed</p>
                     {completedReminders.map(r => (
                       <ReminderItem key={r._id} reminder={r} onEdit={() => setEditingReminder(r)} isCompleted />
                     ))}
                   </div>
                 )}
                 {filteredReminders.length === 0 && (
-                  <p className="text-xs text-gray-400 text-center py-4 italic">No reminders scheduled</p>
+                  <p className="text-sm text-slate-400 text-center py-4 italic">No reminders scheduled</p>
                 )}
               </div>
             </div>
@@ -2474,27 +2487,27 @@ const ReminderItem = ({ reminder, onEdit, onMarkDone, isCompleted }) => {
   const dateStr = new Date(reminder.date).toLocaleDateString("en-GB");
   return (
     <div
-      className={`p-3 rounded-xl transition-all mb-1 ${isCompleted ? "bg-blue-50/50 dark:bg-blue-900/10" : "bg-white dark:bg-gray-800 shadow-sm border border-transparent dark:border-gray-700/50"}`}
+      className={`p-4 rounded-xl transition-colors mb-2 ${isCompleted ? "bg-slate-50/50 dark:bg-slate-800/50 opacity-70" : "bg-white dark:bg-slate-800 shadow-sm border border-slate-200 dark:border-slate-700"}`}
     >
-      <div className="flex items-start gap-3 mb-3">
-        <div className="bg-primary-50 dark:bg-primary-900/20 p-2.5 rounded-xl flex-shrink-0">
+      <div className="flex items-start gap-3 mb-2">
+        <div className="bg-blue-50 dark:bg-blue-900/20 p-2.5 rounded-lg flex-shrink-0 border border-blue-100 dark:border-blue-800/30">
           <ClipboardList
-            size={20}
-            className="text-primary-600 dark:text-primary-400"
+            size={18}
+            className="text-blue-600 dark:text-blue-400"
           />
         </div>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold dark:text-white truncate">
+          <p className="text-base font-semibold text-slate-900 dark:text-white truncate">
             {reminder.title}
           </p>
           {reminder.text && (
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">
+            <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1">
               {reminder.text}
             </p>
           )}
-          <div className="flex items-center gap-2 mt-1">
-            <Clock size={10} className="text-gray-300" />
-            <p className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">
+          <div className="flex items-center gap-2 mt-2">
+            <Clock size={14} className="text-slate-400" />
+            <p className="text-sm font-medium text-slate-500">
               {dateStr} • {reminder.time}
             </p>
           </div>
@@ -2536,7 +2549,7 @@ const EditReminderModal = ({ reminder, onClose, onSave }) => {
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
-      <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] p-10 w-full max-w-md shadow-2xl space-y-8 fade-in h-auto border border-transparent dark:border-gray-800/50">
+      <div className="bg-white dark:bg-gray-900 rounded-xl p-10 w-full max-w-md shadow-2xl space-y-8 fade-in h-auto border border-transparent dark:border-gray-800/50">
         <div className="space-y-2">
           <h2 className="text-3xl font-black dark:text-white tracking-tight">
             Edit <span className="text-primary-500">Reminder</span>
@@ -2741,7 +2754,7 @@ const RecordContent = ({ userData, isDarkMode }) => {
 
   return (
     <div className="p-8 max-w-6xl mx-auto space-y-10 fade-in pb-20">
-      <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] p-10 shadow-xl border border-transparent dark:border-gray-800/50">
+      <div className="bg-white dark:bg-gray-900 rounded-xl p-10 shadow-xl border border-transparent dark:border-gray-800/50">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-12">
           <div>
             <h1 className="text-4xl font-black dark:text-white tracking-tight">
@@ -2808,9 +2821,9 @@ const RecordContent = ({ userData, isDarkMode }) => {
             </div>
           ))}
           {filteredRecords.length === 0 && (
-            <div className="text-center py-20 bg-gray-50/30 dark:bg-gray-800/10 rounded-[2.5rem] border-2 border-dashed border-gray-100 dark:border-gray-800">
-              <FileText className="w-16 h-16 text-gray-200 dark:text-gray-700 mx-auto mb-4" />
-              <p className="text-gray-500 font-bold">
+            <div className="text-center py-20 bg-slate-50/30 dark:bg-slate-800/10 rounded-xl border-2 border-dashed border-slate-200 dark:border-slate-800">
+              <FileText className="w-16 h-16 text-slate-300 dark:text-slate-700 mx-auto mb-4" />
+              <p className="text-slate-500 font-semibold text-lg">
                 No clinical records found matching your search
               </p>
             </div>
@@ -3102,7 +3115,7 @@ const CalendarContent = ({ isDarkMode, reminders, userData }) => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-8 fade-in pb-20">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white dark:bg-gray-900 p-8 rounded-[2.5rem] shadow-xl shadow-gray-100 dark:shadow-none border border-transparent dark:border-gray-800/50">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 bg-white dark:bg-gray-900 p-8 rounded-xl shadow-xl shadow-gray-100 dark:shadow-none border border-transparent dark:border-gray-800/50">
         <div>
           <h1 className="text-4xl font-black dark:text-white tracking-tight">
             Health <span className="text-primary-500">Calendar</span>
@@ -3130,7 +3143,7 @@ const CalendarContent = ({ isDarkMode, reminders, userData }) => {
         </div>
       </div>
 
-      <div className="bg-white dark:bg-gray-900 rounded-[2.5rem] shadow-2xl shadow-gray-100 dark:shadow-none border border-transparent dark:border-gray-800/50 overflow-hidden">
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl shadow-gray-100 dark:shadow-none border border-transparent dark:border-gray-800/50 overflow-hidden">
         <div className="flex items-center justify-between p-8 border-b dark:border-gray-800/50 bg-gray-50/50 dark:bg-gray-800/20">
           <h2 className="text-2xl font-black dark:text-white tracking-tight">
             {view === "Month"
@@ -3418,7 +3431,7 @@ const InfoCard = ({ title, content, onChange }) => (
 // Doctor selection modal component
 const DoctorModal = ({ doctors, onClose, onSelect }) => (
   <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-50 fade-in px-4">
-    <div className="bg-white dark:bg-gray-900 rounded-3xl p-8 w-full max-w-md shadow-2xl border dark:border-gray-800">
+    <div className="bg-white dark:bg-gray-900 rounded-xl p-8 w-full max-w-md shadow-2xl border dark:border-gray-800">
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-2xl font-bold dark:text-white capitalize">
           Select Your Doctor

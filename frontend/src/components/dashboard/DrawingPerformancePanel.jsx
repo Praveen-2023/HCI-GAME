@@ -51,9 +51,9 @@ const DrawingPerformancePanel = ({ userId }) => {
   })).sort((a, b) => b.rate - a.rate);
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-3xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm mt-6">
+    <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm mt-6">
       <div className="flex justify-between items-center mb-6">
-        <h3 className="text-xl font-bold text-gray-800 dark:text-white">Drawing Performance</h3>
+        <h3 className="text-lg font-semibold text-slate-800 dark:text-white">Drawing Performance</h3>
         <button 
           onClick={() => navigate('/analytics')}
           className="text-sm bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-xl transition"
@@ -63,17 +63,17 @@ const DrawingPerformancePanel = ({ userId }) => {
       </div>
 
       <div className="grid grid-cols-3 gap-4 mb-8">
-        <div className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-4 text-center">
-          <p className="text-xs text-gray-400 uppercase font-bold tracking-wider mb-1">Total Sessions</p>
-          <p className="text-3xl font-black text-gray-800 dark:text-white">{totalSessions}</p>
+        <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 text-center border border-slate-100 dark:border-slate-800">
+          <p className="text-xs text-slate-500 font-medium tracking-wider mb-1">Total Sessions</p>
+          <p className="text-3xl font-bold text-slate-800 dark:text-white">{totalSessions}</p>
         </div>
-        <div className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-4 text-center">
-          <p className="text-xs text-gray-400 uppercase font-bold tracking-wider mb-1">Best Score</p>
-          <p className="text-3xl font-black text-gray-800 dark:text-white">{bestScore}</p>
+        <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 text-center border border-slate-100 dark:border-slate-800">
+          <p className="text-xs text-slate-500 font-medium tracking-wider mb-1">Best Score</p>
+          <p className="text-3xl font-bold text-slate-800 dark:text-white">{bestScore}</p>
         </div>
-        <div className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-4 text-center">
-          <p className="text-xs text-gray-400 uppercase font-bold tracking-wider mb-1">Avg Success Rate</p>
-          <p className="text-3xl font-black text-blue-500">{avgSuccessRate}%</p>
+        <div className="bg-slate-50 dark:bg-slate-900/50 rounded-xl p-4 text-center border border-slate-100 dark:border-slate-800">
+          <p className="text-xs text-slate-500 font-medium tracking-wider mb-1">Avg Success</p>
+          <p className="text-3xl font-bold text-blue-600 dark:text-blue-400">{avgSuccessRate}%</p>
         </div>
       </div>
 
@@ -95,13 +95,13 @@ const DrawingPerformancePanel = ({ userId }) => {
         </div>
       </div>
 
-      <div className="mt-8 border-t border-gray-100 dark:border-gray-700 pt-6">
-        <h4 className="text-sm font-bold text-gray-800 dark:text-white mb-4">Recent Sessions</h4>
+      <div className="mt-8 border-t border-slate-200 dark:border-slate-700 pt-6">
+        <h4 className="text-sm font-semibold text-slate-800 dark:text-white mb-4">Recent Sessions</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {games.slice(0, 4).map(g => (
-            <div key={g.gameId} className="bg-gray-50 dark:bg-gray-900 p-4 rounded-2xl flex justify-between items-center">
+            <div key={g.gameId} className="bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl flex justify-between items-center border border-slate-100 dark:border-slate-800">
               <div>
-                <p className="text-sm font-bold text-gray-800 dark:text-white">Game #{g.gameIndex}</p>
+                <p className="text-sm font-semibold text-slate-800 dark:text-white">Session #{g.gameIndex}</p>
                 <p className="text-xs text-gray-400">{new Date(g.startedAt).toLocaleDateString()}</p>
               </div>
               <div className="flex items-center gap-4">
