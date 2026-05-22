@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { gameService } from "../../services/gameService";
 import BoardDrawingTrajectoryReplay from "../game/BoardDrawingTrajectoryReplay";
+import DrawingPerformancePanel from "../../components/dashboard/DrawingPerformancePanel";
 import {
   ArrowLeft,
   TrendingUp,
@@ -1351,6 +1352,7 @@ const PatientAnalytics = () => {
                     <div>
                       <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-2">Board Drawing Trajectory Replay</h3>
                       <BoardDrawingTrajectoryReplay attempts={selectedBoardDrawingAttempts} />
+                      <DrawingPerformancePanel userId={patientId} />
                     </div>
                   )}
 

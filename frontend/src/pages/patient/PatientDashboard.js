@@ -53,6 +53,7 @@ import { reminderService } from "../../services/reminderService";
 import ChatPage from "../common/ChatPage";
 import PatientAppointments from "./PatientAppointments";
 import BoardDrawingTrajectoryReplay from "../game/BoardDrawingTrajectoryReplay";
+import DrawingPerformancePanel from "../../components/dashboard/DrawingPerformancePanel";
 
 export default function PatientDashboard({ userId }) {
   const { user, logout, isDarkMode, toggleDarkMode } = useAuth();
@@ -2129,6 +2130,8 @@ const DashboardContent = ({
                     <span className="text-xs text-gray-400 font-medium">— Session {selectedSession + 1}</span>
                   </div>
                   <BoardDrawingTrajectoryReplay attempts={selectedBoardDrawingAttempts} />
+                  
+                  <DrawingPerformancePanel userId={null} />
                 </div>
               )}
 

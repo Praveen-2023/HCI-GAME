@@ -190,32 +190,58 @@ const ShapeBar = ({ label, attempts, successes }) => {
 
 const GameAnalytics = () => {
   const [games, setGames] = useState([]);
+  const [selectedGame, setSelectedGame] = useState(null);
   const [selectedGameId, setSelectedGameId] = useState(null);
   const [selectedTryId, setSelectedTryId] = useState(null);
   const [view, setView] = useState("list"); // "list" | "game" | "try"
   const [importError, setImportError] = useState("");
+  const [loading, setLoading] = useState(false);
   const fileInputRef = useRef(null);
+
+  const refreshList = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await GameStorage.getAllGames();
+      setGames(data || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadGameDetail = useCallback(async (gid) => {
+    setLoading(true);
+    try {
+      const data = await GameStorage.getGame(gid);
+      setSelectedGame(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // On mount, read ?gameId from URL if present
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const gid = params.get("gameId");
-    refresh();
+    refreshList();
     if (gid) {
       setSelectedGameId(gid);
+      loadGameDetail(gid);
       setView("game");
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const refresh = useCallback(() => {
-    setGames(GameStorage.getAllGames());
-  }, []);
+  useEffect(() => {
+    if (selectedGameId && view === "game" && selectedGame?.gameId !== selectedGameId) {
+      loadGameDetail(selectedGameId);
+    }
+  }, [selectedGameId, view, selectedGame, loadGameDetail]);
 
-  const selectedGame = useMemo(
-    () => games.find((g) => g.gameId === selectedGameId) ?? null,
-    [games, selectedGameId]
-  );
+
 
   const selectedTry = useMemo(
     () => (selectedGame?.tries ?? []).find((t) => t.tryId === selectedTryId) ?? null,
@@ -247,11 +273,10 @@ const GameAnalytics = () => {
     return { totalGames: games.length, completedGames: completed.length, totalScore, totalReps, avgRate, avgCompletion, totalTries: allTries.length, shapeBreakdown };
   }, [games]);
 
-  // ── handlers ──
-  const handleDeleteGame = (gid) => {
+  const handleDeleteGame = async (gid) => {
     if (!window.confirm("Delete this game record permanently?")) return;
-    GameStorage.deleteGame(gid);
-    refresh();
+    await GameStorage.deleteGame(gid);
+    refreshList();
     if (gid === selectedGameId) { setSelectedGameId(null); setView("list"); }
   };
 
@@ -262,8 +287,8 @@ const GameAnalytics = () => {
     if (!file) return;
     try {
       const obj = await GameStorage.importGameJson(file);
-      const added = GameStorage.addImportedGame(obj);
-      if (added) { setImportError(""); refresh(); }
+      const added = await GameStorage.addImportedGame(obj);
+      if (added) { setImportError(""); refreshList(); }
       else setImportError("Game already imported (same id).");
     } catch {
       setImportError("Invalid file — must be a game JSON export.");
@@ -271,9 +296,9 @@ const GameAnalytics = () => {
     e.target.value = "";
   };
 
-  const handleClearAll = () => {
+  const handleClearAll = async () => {
     if (!window.confirm("Delete ALL saved games? This cannot be undone.")) return;
-    GameStorage.clearAll();
+    await GameStorage.clearAll();
     setGames([]);
     setSelectedGameId(null);
     setView("list");
@@ -572,7 +597,9 @@ const GameAnalytics = () => {
         <div style={{ marginLeft: "auto", display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button style={s.btn()} onClick={() => fileInputRef.current?.click()}>⬆ Import JSON</button>
           <input ref={fileInputRef} type="file" accept=".json" style={{ display: "none" }} onChange={handleImport} />
-          <button style={s.btn()} onClick={refresh}>↻ Refresh</button>
+          <button style={s.btn()} onClick={refreshList} disabled={loading}>
+            {loading ? "↻ Loading..." : "↻ Refresh"}
+          </button>
           {games.length > 0 && (
             <button style={s.btn("danger")} onClick={handleClearAll}>⚠ Clear All</button>
           )}
