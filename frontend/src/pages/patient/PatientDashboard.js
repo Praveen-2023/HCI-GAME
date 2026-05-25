@@ -51,7 +51,12 @@ import {
   Info,
   Star,
   Menu,
-  X
+  X,
+  Trophy,
+  Zap,
+  BarChart3,
+  Square,
+  CheckSquare
 } from "lucide-react";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
@@ -144,7 +149,7 @@ export default function PatientDashboard({ userId }) {
     >
       {/* Mobile Overlay Background */}
       {isMobileMenuOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity"
           onClick={() => setIsMobileMenuOpen(false)}
         />
@@ -494,8 +499,8 @@ const CoordinateVisualizer = ({ coordinates }) => {
     totalDistance += d;
 
     // dt is ~150ms if timestamps are missing
-    const dt = p2.timestamp !== undefined && p1.timestamp !== undefined 
-      ? (p2.timestamp - p1.timestamp) 
+    const dt = p2.timestamp !== undefined && p1.timestamp !== undefined
+      ? (p2.timestamp - p1.timestamp)
       : 0.15;
     const speed = d / (dt || 0.15);
     speeds.push(speed);
@@ -537,7 +542,7 @@ const CoordinateVisualizer = ({ coordinates }) => {
           <div className="relative w-full aspect-video bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 shadow-inner group">
             {/* Grid Pattern */}
             <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:5%_5%] opacity-20"></div>
-            
+
             {/* SVG Trajectory */}
             <svg viewBox="0 0 100 100" className="w-full h-full p-4" preserveAspectRatio="none">
               {/* Full trace path (faint background) */}
@@ -550,7 +555,7 @@ const CoordinateVisualizer = ({ coordinates }) => {
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
-              
+
               {/* Played path */}
               <polyline
                 points={validCoords.slice(0, safeIdx + 1).map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
@@ -564,7 +569,7 @@ const CoordinateVisualizer = ({ coordinates }) => {
 
               {/* Start & End Points */}
               <circle cx={validCoords[0].x * 100} cy={validCoords[0].y * 100} r="1.5" fill="#3B82F6" stroke="#fff" strokeWidth="0.5" />
-              <circle cx={validCoords[validCoords.length-1].x * 100} cy={validCoords[validCoords.length-1].y * 100} r="1.5" fill="#EF4444" stroke="#fff" strokeWidth="0.5" />
+              <circle cx={validCoords[validCoords.length - 1].x * 100} cy={validCoords[validCoords.length - 1].y * 100} r="1.5" fill="#EF4444" stroke="#fff" strokeWidth="0.5" />
 
               {/* Current Position pointer */}
               <circle
@@ -591,7 +596,7 @@ const CoordinateVisualizer = ({ coordinates }) => {
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Path</span>
               <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500"></span> End</span>
             </div>
-            
+
             <div className="absolute bottom-3 right-3 text-[10px] bg-black/75 px-2 py-1 rounded-lg border border-gray-800 text-gray-400 font-mono">
               Point {safeIdx + 1}/{validCoords.length}
             </div>
@@ -602,20 +607,19 @@ const CoordinateVisualizer = ({ coordinates }) => {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setIsPlaying(!isPlaying)}
-                className={`p-2.5 rounded-xl flex items-center justify-center text-white transition-all transform active:scale-95 ${
-                  isPlaying 
-                    ? "bg-amber-500 hover:bg-amber-600" 
+                className={`p-2.5 rounded-xl flex items-center justify-center text-white transition-all transform active:scale-95 ${isPlaying
+                    ? "bg-amber-500 hover:bg-amber-600"
                     : "bg-primary-500 hover:bg-primary-600"
-                }`}
+                  }`}
                 title={isPlaying ? "Pause" : "Play"}
               >
                 {isPlaying ? (
-                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
                 ) : (
-                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
                 )}
               </button>
-              
+
               <button
                 onClick={() => { setIsPlaying(false); setCurrentIdx(0); }}
                 className="p-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-xl transition-all active:scale-95 border dark:border-gray-600"
@@ -656,11 +660,10 @@ const CoordinateVisualizer = ({ coordinates }) => {
               {/* Loop */}
               <button
                 onClick={() => setIsLooping(!isLooping)}
-                className={`p-2 rounded-lg border transition-all ${
-                  isLooping 
-                    ? "bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800" 
+                className={`p-2 rounded-lg border transition-all ${isLooping
+                    ? "bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800"
                     : "bg-transparent text-gray-400 border-gray-200 dark:border-gray-700"
-                }`}
+                  }`}
                 title="Loop"
               >
                 <svg className="w-4 h-4 fill-none stroke-current" strokeWidth="2.5" viewBox="0 0 24 24">
@@ -677,14 +680,14 @@ const CoordinateVisualizer = ({ coordinates }) => {
             <h4 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">
               Kinematic Metrics
             </h4>
-            
+
             <div className="space-y-3.5">
               {/* Total Distance */}
               <div className="flex justify-between items-center border-b dark:border-gray-800 pb-2">
                 <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Path Distance</span>
                 <span className="text-xs font-bold dark:text-white">{totalDistance.toFixed(2)} units</span>
               </div>
-              
+
               {/* Avg Speed */}
               <div className="flex justify-between items-center border-b dark:border-gray-800 pb-2">
                 <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Avg Velocity</span>
@@ -702,13 +705,12 @@ const CoordinateVisualizer = ({ coordinates }) => {
                 <div className="flex flex-col">
                   <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Jitter (Tremor Index)</span>
                 </div>
-                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
-                  jitterScore < 8 
-                    ? "text-green-600 bg-green-50 dark:bg-green-950/20" 
-                    : jitterScore < 18 
-                      ? "text-yellow-600 bg-yellow-50 dark:bg-yellow-950/20" 
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${jitterScore < 8
+                    ? "text-green-600 bg-green-50 dark:bg-green-950/20"
+                    : jitterScore < 18
+                      ? "text-yellow-600 bg-yellow-50 dark:bg-yellow-950/20"
                       : "text-red-600 bg-red-50 dark:bg-red-950/20"
-                }`}>
+                  }`}>
                   {jitterScore.toFixed(1)}
                 </span>
               </div>
@@ -810,19 +812,19 @@ const FingerClickVisualizer = ({ session, fingerTimeouts, movements, isDarkMode 
         rightIndex: 'H', rightMiddle: 'J', rightRing: 'K', rightPinky: 'L'
       };
       if (mode === 'mobile') {
-         const keys = Object.keys(fingerTimeouts);
-         if (keys.includes('thumb')) {
-            map.thumb = 'A'; map.index = 'S'; map.middle = 'D'; map.ring = 'F'; map.pinky = 'G';
-         } else {
-            map.pinky = 'A'; map.ring = 'S'; map.middle = 'D'; map.index = 'F';
-         }
+        const keys = Object.keys(fingerTimeouts);
+        if (keys.includes('thumb')) {
+          map.thumb = 'A'; map.index = 'S'; map.middle = 'D'; map.ring = 'F'; map.pinky = 'G';
+        } else {
+          map.pinky = 'A'; map.ring = 'S'; map.middle = 'D'; map.index = 'F';
+        }
       }
-      
+
       Object.keys(fingerTimeouts).forEach(finger => {
-         const k = map[finger];
-         if (k && fingerTimeouts[finger] !== -1) {
-           keyDataMap[k] = { key: k, expectedFinger: finger, isDisabled: fingerTimeouts[finger] === 0 };
-         }
+        const k = map[finger];
+        if (k && fingerTimeouts[finger] !== -1) {
+          keyDataMap[k] = { key: k, expectedFinger: finger, isDisabled: fingerTimeouts[finger] === 0 };
+        }
       });
     }
 
@@ -838,10 +840,10 @@ const FingerClickVisualizer = ({ session, fingerTimeouts, movements, isDarkMode 
     }
 
     const getSortWeight = (k) => FINGER_SORT_ORDER[k] || 100;
-    
+
     // Sort keys logically based on keyboard position
     const sortedKeys = Object.values(keyDataMap).sort((a, b) => getSortWeight(a.key) - getSortWeight(b.key));
-    
+
     const coords = {};
     sortedKeys.forEach((item, index) => {
       coords[item.key] = {
@@ -905,13 +907,13 @@ const FingerClickVisualizer = ({ session, fingerTimeouts, movements, isDarkMode 
   };
 
   // Use all timeouts defined in the session
-  const filteredTimeouts = fingerTimeouts 
+  const filteredTimeouts = fingerTimeouts
     ? Object.entries(fingerTimeouts).filter(([_, timeout]) => timeout !== -1)
     : [];
 
   return (
     <div className="space-y-4">
-      
+
       {/* Session Finger Timeouts / Matrix Panel - NOW FILTERED */}
       {filteredTimeouts.length > 0 && (
         <div className="bg-gray-100 dark:bg-gray-800/50 p-3 rounded-xl border border-gray-200 dark:border-gray-700">
@@ -922,13 +924,13 @@ const FingerClickVisualizer = ({ session, fingerTimeouts, movements, isDarkMode 
             {filteredTimeouts.map(([finger, timeout]) => {
               const dotColor = FINGER_COLORS[finger] || FINGER_COLORS.default;
               return (
-                <div 
-                  key={finger} 
+                <div
+                  key={finger}
                   className={`flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-300 shadow-sm ${timeout === 0 ? 'opacity-50 grayscale' : ''}`}
                 >
-                  <div 
-                    className="w-2.5 h-2.5 rounded-full shadow-sm" 
-                    style={{ backgroundColor: dotColor }} 
+                  <div
+                    className="w-2.5 h-2.5 rounded-full shadow-sm"
+                    style={{ backgroundColor: dotColor }}
                   />
                   <span className={`font-medium ${timeout === 0 ? 'line-through' : ''}`}>{formatFingerFull(finger)}</span>
                   <span className="text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-md ml-1 font-mono">
@@ -946,12 +948,12 @@ const FingerClickVisualizer = ({ session, fingerTimeouts, movements, isDarkMode 
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:5%_10%] opacity-20 pointer-events-none"></div>
 
         {Object.entries(activeKeyCoords)
-          .sort((a,b) => FINGER_SORT_ORDER[a[0]] - FINGER_SORT_ORDER[b[0]])
+          .sort((a, b) => FINGER_SORT_ORDER[a[0]] - FINGER_SORT_ORDER[b[0]])
           .map(([letter, pos]) => {
             const isCurrent = currentMove?.key?.toUpperCase() === letter;
             const isPrevious = previousMove?.key?.toUpperCase() === letter && !isCurrent;
             const wasPlayed = activeFingersSet.has(pos.expectedFinger);
-            
+
             let bgClass = "bg-gray-800";
             let borderClass = "border-gray-700";
             let textClass = "text-gray-400";
@@ -967,7 +969,7 @@ const FingerClickVisualizer = ({ session, fingerTimeouts, movements, isDarkMode 
             }
 
             if (isCurrent) {
-              bgClass = ""; 
+              bgClass = "";
               customStyle.backgroundColor = FINGER_COLORS[currentMove?.finger] || FINGER_COLORS.default;
               borderClass = currentMove.correct ? "border-emerald-500 border-4 scale-110 shadow-[0_0_15px_rgba(16,185,129,0.5)]" : "border-red-500 border-4 scale-110 shadow-[0_0_15px_rgba(239,68,68,0.5)]";
               textClass = "text-white font-bold";
@@ -978,7 +980,7 @@ const FingerClickVisualizer = ({ session, fingerTimeouts, movements, isDarkMode 
             }
 
             return (
-              <div 
+              <div
                 key={letter}
                 className={`relative flex-1 flex flex-col items-center justify-center h-24 sm:h-32 max-w-[120px] rounded-xl border-2 transition-all duration-300 ${bgClass} ${borderClass} ${textClass} ${opacityClass}`}
                 style={customStyle}
@@ -986,68 +988,66 @@ const FingerClickVisualizer = ({ session, fingerTimeouts, movements, isDarkMode 
                 <span className="text-2xl sm:text-4xl font-black">{letter}</span>
                 <span className="text-[10px] sm:text-xs mt-2 uppercase tracking-wider opacity-80">{formatFingerShort(pos.expectedFinger)}</span>
                 {pos.isDisabled && (
-                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/80 px-2 py-1 rounded text-[10px] text-white whitespace-nowrap transform -rotate-12 border border-white/20">DISABLED</div>
+                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/80 px-2 py-1 rounded text-[10px] text-white whitespace-nowrap transform -rotate-12 border border-white/20">DISABLED</div>
                 )}
               </div>
             );
-        })}
+          })}
       </div>
 
-        {/* Live Metrics overlay */}
-        {currentMove && (
-          <div className="w-full flex justify-between items-center bg-gray-900/80 backdrop-blur-sm border border-gray-800 p-4 rounded-xl text-white text-xs font-mono shadow-md">
-            <div className="flex flex-col">
-              <span className="text-gray-400 text-[10px] uppercase tracking-wider">Step</span>
-              <span className="text-sm">{activeStep + 1} / {movements.length}</span>
-            </div>
-            
-            <div className="flex flex-col items-center">
-              <span className="text-gray-400 text-[10px] uppercase tracking-wider">Pressed Key</span>
-              <span className={`font-bold text-xl ${currentMove.correct ? "text-emerald-400" : "text-red-400"}`}>
-                {currentMove.key === 'none' ? '—' : currentMove.key}
-              </span>
-            </div>
-
-            <div className="flex flex-col">
-              <span className="text-gray-400 text-[10px] uppercase tracking-wider">Action</span>
-              <span className="flex items-center gap-1 text-sm">
-                <div 
-                  className="w-2 h-2 rounded-full" 
-                  style={{ backgroundColor: currentMove.finger === 'none' ? '#ef4444' : (FINGER_COLORS[currentMove.finger] || FINGER_COLORS.default) }}
-                />
-                {currentMove.finger === 'none' ? 'Timeout (Missed)' : formatFingerFull(currentMove.finger)}
-              </span>
-              {currentMove.finger !== currentMove.expectedFinger && (
-                <span className="text-[10px] text-red-400 mt-1">
-                  Expected: {formatFingerFull(currentMove.expectedFinger)}
-                </span>
-              )}
-            </div>
-
-            <div className="flex flex-col text-right">
-              <span className="text-gray-400 text-[10px] uppercase tracking-wider">Speed</span>
-              <span className={`text-sm ${
-                  currentMove.responsetime === -1 
-                  ? "text-yellow-400"
-                  : (fingerTimeouts && currentMove.responsetime > (fingerTimeouts[currentMove.finger] || 99))
-                  ? "text-red-400" 
-                  : "text-emerald-400"
-                }`}
-              >
-                {currentMove.responsetime === -1 ? 'TIMEOUT' : `${currentMove.responsetime}s`}
-              </span>
-            </div>
+      {/* Live Metrics overlay */}
+      {currentMove && (
+        <div className="w-full flex justify-between items-center bg-gray-900/80 backdrop-blur-sm border border-gray-800 p-4 rounded-xl text-white text-xs font-mono shadow-md">
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase tracking-wider">Step</span>
+            <span className="text-sm">{activeStep + 1} / {movements.length}</span>
           </div>
-        )}
+
+          <div className="flex flex-col items-center">
+            <span className="text-gray-400 text-[10px] uppercase tracking-wider">Pressed Key</span>
+            <span className={`font-bold text-xl ${currentMove.correct ? "text-emerald-400" : "text-red-400"}`}>
+              {currentMove.key === 'none' ? '—' : currentMove.key}
+            </span>
+          </div>
+
+          <div className="flex flex-col">
+            <span className="text-gray-400 text-[10px] uppercase tracking-wider">Action</span>
+            <span className="flex items-center gap-1 text-sm">
+              <div
+                className="w-2 h-2 rounded-full"
+                style={{ backgroundColor: currentMove.finger === 'none' ? '#ef4444' : (FINGER_COLORS[currentMove.finger] || FINGER_COLORS.default) }}
+              />
+              {currentMove.finger === 'none' ? 'Timeout (Missed)' : formatFingerFull(currentMove.finger)}
+            </span>
+            {currentMove.finger !== currentMove.expectedFinger && (
+              <span className="text-[10px] text-red-400 mt-1">
+                Expected: {formatFingerFull(currentMove.expectedFinger)}
+              </span>
+            )}
+          </div>
+
+          <div className="flex flex-col text-right">
+            <span className="text-gray-400 text-[10px] uppercase tracking-wider">Speed</span>
+            <span className={`text-sm ${currentMove.responsetime === -1
+                ? "text-yellow-400"
+                : (fingerTimeouts && currentMove.responsetime > (fingerTimeouts[currentMove.finger] || 99))
+                  ? "text-red-400"
+                  : "text-emerald-400"
+              }`}
+            >
+              {currentMove.responsetime === -1 ? 'TIMEOUT' : `${currentMove.responsetime}s`}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Control Buttons */}
       <div className="flex items-center gap-3">
         <button
           type="button"
           onClick={() => setIsPlaying(!isPlaying)}
-          className={`px-4 py-2 text-white font-bold text-xs rounded-xl transition-all active:scale-95 ${
-            isPlaying ? "bg-amber-500 hover:bg-amber-600" : "bg-blue-500 hover:bg-blue-600"
-          }`}
+          className={`px-4 py-2 text-white font-bold text-xs rounded-xl transition-all active:scale-95 ${isPlaying ? "bg-amber-500 hover:bg-amber-600" : "bg-blue-500 hover:bg-blue-600"
+            }`}
         >
           {isPlaying ? "Pause" : "Play Action"}
         </button>
@@ -1172,7 +1172,7 @@ const LaptopMovementVisualizer = ({ movements, isDarkMode }) => {
       {/* SVG Canvas */}
       <div className="relative w-full aspect-[2.5/1] bg-gray-900 rounded-2xl border border-gray-800 shadow-inner overflow-hidden">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:5%_10%] opacity-20"></div>
-        
+
         <svg viewBox="0 0 100 50" className="w-full h-full p-4">
           <defs>
             <marker id="arrow" viewBox="0 0 10 10" refX="15" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
@@ -1265,9 +1265,8 @@ const LaptopMovementVisualizer = ({ movements, isDarkMode }) => {
         <button
           type="button"
           onClick={() => setIsPlaying(!isPlaying)}
-          className={`px-3 py-1.5 text-white font-bold text-xs rounded-xl transition-all active:scale-95 ${
-            isPlaying ? "bg-amber-500 hover:bg-amber-600" : "bg-primary-500 hover:bg-primary-600"
-          }`}
+          className={`px-3 py-1.5 text-white font-bold text-xs rounded-xl transition-all active:scale-95 ${isPlaying ? "bg-amber-500 hover:bg-amber-600" : "bg-primary-500 hover:bg-primary-600"
+            }`}
         >
           {isPlaying ? "Pause" : "Play Path"}
         </button>
@@ -1317,7 +1316,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
   const fingerIcons = { thumb: <ThumbsUp size={16} />, index: <PenTool size={16} />, middle: <Hand size={16} />, ring: <Circle size={16} />, pinky: <Hand size={16} />, leftPinky: <Hand size={16} />, leftRing: <Circle size={16} />, leftMiddle: <Hand size={16} />, leftIndex: <PenTool size={16} />, rightIndex: <PenTool size={16} />, rightMiddle: <Hand size={16} />, rightRing: <Circle size={16} />, rightPinky: <Hand size={16} /> };
   const fingerNames = { thumb: "Thumb", index: "Index", middle: "Middle", ring: "Ring", pinky: "Pinky", leftPinky: "L Pinky", leftRing: "L Ring", leftMiddle: "L Middle", leftIndex: "L Index", rightIndex: "R Index", rightMiddle: "R Middle", rightRing: "R Ring", rightPinky: "R Pinky" };
 
-  const activeFingerKeys = session?.fingerTimeouts 
+  const activeFingerKeys = session?.fingerTimeouts
     ? Object.keys(session.fingerTimeouts).filter(f => session.fingerTimeouts[f] !== -1)
     : ['thumb', 'index', 'middle', 'ring', 'pinky'];
 
@@ -1326,12 +1325,12 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
     const total = movements.length;
     const correct = movements.filter(m => m.correct === 1).length;
     const incorrect = movements.filter(m => m.correct === -1).length;
-    
+
     const correctMovements = movements.filter(m => m.correct === 1 && m.responsetime > 0);
     const avgResponse = correctMovements.length > 0
       ? correctMovements.reduce((sum, m) => sum + m.responsetime, 0) / correctMovements.length
       : 0;
-      
+
     const accuracy = (correct + incorrect) > 0
       ? (correct / (correct + incorrect)) * 100
       : 0;
@@ -1394,7 +1393,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
                 </div>
                 <h4 className="font-bold text-sm text-gray-800 dark:text-white mb-1">{f.name} Finger</h4>
                 <p className="text-[11px] text-gray-400 mb-3">{f.correct} of {f.total} correct</p>
-                
+
                 <div className="space-y-2 pt-2 border-t dark:border-gray-700">
                   <div className="flex justify-between text-xs">
                     <span className="text-gray-400">Response</span>
@@ -1445,7 +1444,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
 const GAMES_LIST = [
   {
     type: "type1",
-    name: "Piano Reaction Game",
+    name: "Piano Reaction",
     path: "/piano-reaction",
     desc: "Tests and improves cognitive reaction speeds by tapping highlighted piano keys in response to stimuli.",
     clinicalFocus: "Cognitive processing speed, manual dexterity, and hand-eye coordination.",
@@ -1467,7 +1466,7 @@ const GAMES_LIST = [
   },
   {
     type: "fruit_basket",
-    name: "Arm – Fruit Fetch",
+    name: "Fruit Fetch",
     path: "/fruit-basket",
     desc: "Grasp and move falling fruits into a basket using full arm gestures to improve range of motion.",
     clinicalFocus: "Gross motor coordination, shoulder/elbow articulation, and spatial reaching velocity.",
@@ -1492,7 +1491,7 @@ const DashboardContent = ({
   const [reminders, setReminders] = useState([]);
   const [selectedPeriod, setSelectedPeriod] = useState("today");
   const [isMounted, setIsMounted] = useState(false);
-  
+
   // Game Selector State
   const defaultGameType = stats?.games?.[0]?.type || "type1";
   const [selectedGameType, setSelectedGameType] = useState(defaultGameType);
@@ -1531,7 +1530,7 @@ const DashboardContent = ({
 
     return sessions;
   }, [stats, selectedGameType, pianoSubTab]);
-  
+
   const today = useMemo(() => new Date(), []); // Stable reference for calculations
 
   const totals = useMemo(
@@ -1965,11 +1964,10 @@ const DashboardContent = ({
               <button
                 key={g.type}
                 onClick={() => { setSelectedGameType(g.type); setSelectedSession(0); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                  selectedGameType === g.type
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${selectedGameType === g.type
                     ? 'bg-gray-900 text-white shadow-md dark:bg-gray-100 dark:text-gray-900'
                     : 'bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'
-                }`}
+                  }`}
               >
                 <span className="text-base" style={{ color: g.accent }}>{React.cloneElement(g.icon, { className: 'w-5 h-5' })}</span>
                 <span>{g.name}</span>
@@ -1984,22 +1982,20 @@ const DashboardContent = ({
           {selectedGameType === "type1" && (
             <div className="flex gap-2 p-1.5 bg-gray-100/80 dark:bg-gray-950/40 backdrop-blur-md rounded-2xl border border-gray-200/50 dark:border-gray-800/50 mb-6 max-w-md">
               <button
-                className={`flex-1 py-3 px-4 font-semibold text-sm transition-colors border-b-2 flex justify-center items-center gap-2 ${
-                  pianoSubTab === 'finger'
+                className={`flex-1 py-3 px-4 font-semibold text-sm transition-colors border-b-2 flex justify-center items-center gap-2 ${pianoSubTab === 'finger'
                     ? 'border-blue-600 text-blue-600 dark:text-blue-400'
                     : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
+                  }`}
                 onClick={() => setPianoSubTab('finger')}
               >
                 <Activity size={18} />
                 Finger Tracking
               </button>
               <button
-                className={`flex-1 py-3 px-4 font-semibold text-sm transition-colors border-b-2 flex justify-center items-center gap-2 ${
-                  pianoSubTab === 'ankle'
+                className={`flex-1 py-3 px-4 font-semibold text-sm transition-colors border-b-2 flex justify-center items-center gap-2 ${pianoSubTab === 'ankle'
                     ? 'border-blue-600 text-blue-600 dark:text-blue-400'
                     : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
+                  }`}
                 onClick={() => setPianoSubTab('ankle')}
               >
                 <Clock size={18} />
@@ -2107,11 +2103,10 @@ const DashboardContent = ({
                       <button
                         key={i}
                         onClick={() => setSelectedSession(i)}
-                        className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${
-                          selectedSession === i
+                        className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all ${selectedSession === i
                             ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 shadow-md'
                             : 'bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-600'
-                        }`}
+                          }`}
                       >
                         S{i + 1} · {new Date(s.time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                       </button>
@@ -2183,7 +2178,7 @@ const DashboardContent = ({
                     <span className="text-xs text-gray-400 font-medium">— Session {selectedSession + 1}</span>
                   </div>
                   <BoardDrawingTrajectoryReplay attempts={selectedBoardDrawingAttempts} />
-                  
+
                   <DrawingPerformancePanel userId={null} />
                 </div>
               )}
@@ -2196,11 +2191,11 @@ const DashboardContent = ({
                     <span className="text-xs text-gray-400 font-medium">— Session {selectedSession + 1}</span>
                   </div>
                   <CoordinateVisualizer coordinates={selectedSessionData?.session?.coordinates} />
-                </div> 
+                </div>
               )}
 
               {console.log(selectedSessionData.session.coordinates)}
-              
+
               {/* Laptop Visualizer */}
               {selectedGameType !== "board_drawing" && (selectedGame?.hasCoordinates || (selectedGameType === "type1" && pianoSubTab === "ankle")) && selectedCoordinates.length > 0 && (
                 <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
@@ -2209,7 +2204,7 @@ const DashboardContent = ({
                   <LaptopMovementVisualizer movements={selectedSessionData?.session?.laptopMovements} isDarkMode={isDarkMode} />
                 </div>
               )}
-              
+
               {/* Piano Reaction Game Modes Analytics */}
               {selectedGameType === "type1" && pianoSubTab === "finger" && (
                 <div>
@@ -2252,26 +2247,50 @@ const DashboardContent = ({
           <div className="lg:col-span-2 space-y-6">
 
             {/* Greeting Row */}
-            <div className="flex flex-wrap items-center justify-between gap-4">
+            {/* Greeting Row */}
+            <div className="flex flex-wrap items-center justify-between gap-6">
               <div>
-                <h1 className="text-3xl font-bold text-slate-900 dark:text-white">
+                <h1 className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
                   Hello, {userData?.name?.split(' ')[0] || 'there'}
                 </h1>
-                <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium text-lg">Your clinical overview for today.</p>
+                <p className="text-slate-500 dark:text-slate-400 mt-1 font-medium text-lg">
+                  Your clinical overview for today.
+                </p>
               </div>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-3 px-5 py-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 rounded-xl">
-                  <Activity className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+
+              <div className="flex flex-wrap items-center gap-4">
+                {/* Day Streak Card */}
+                <div className="flex items-center gap-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 rounded-xl px-5 min-h-[90px]">
+                  <Activity className="w-6 h-6 text-blue-600 dark:text-blue-400 shrink-0" />
                   <div>
-                    <p className="text-xl font-bold text-blue-800 dark:text-blue-300 leading-none">{currentStreak}</p>
-                    <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">Day Streak</p>
+                    <p className="text-2xl font-bold text-blue-800 dark:text-blue-300 leading-tight">
+                      {currentStreak}
+                    </p>
+                    <p className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                      Day Streak
+                    </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-3 px-5 py-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30 rounded-xl">
-                  <Target className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
-                  <div>
-                    <p className="text-xl font-bold text-emerald-800 dark:text-emerald-300 leading-none">{stats?.totalScore || 0}</p>
-                    <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">Points</p>
+
+                {/* Exercises Card */}
+                <div className="flex flex-col justify-center bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30 rounded-xl px-6 min-h-[90px]">
+                  <div className="flex items-center gap-4 mb-2">
+                    <Target className="w-6 h-6 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <div>
+                      <p className="text-2xl font-bold text-emerald-800 dark:text-emerald-300 leading-tight">
+                        {todaySessionsCount} <span className="text-lg font-medium text-slate-400 dark:text-slate-500">/ 3</span>
+                      </p>
+                      <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                        Exercises
+                      </p>
+                    </div>
+                  </div>
+                  {/* Progress Bar */}
+                  <div className="w-full bg-emerald-200/50 dark:bg-emerald-950/50 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-emerald-600 dark:bg-emerald-400 h-full rounded-full transition-all duration-500"
+                      style={{ width: `${Math.min((todaySessionsCount / 3) * 100, 100)}%` }}
+                    />
                   </div>
                 </div>
               </div>
@@ -2280,47 +2299,21 @@ const DashboardContent = ({
             {/* Summary Cards Row */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Daily Goal */}
-              <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-3">Daily Goal</p>
-                <p className="text-4xl font-bold text-slate-900 dark:text-white">
-                  {todaySessionsCount} <span className="text-xl text-slate-400 dark:text-slate-500">/ 3</span>
-                </p>
-                <p className="text-sm text-slate-500 mt-1 mb-4">Exercises Completed</p>
-                <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-2">
-                  <div
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min((todaySessionsCount / 3) * 100, 100)}%` }}
-                  />
-                </div>
-              </div>
+
 
               {/* Keep Going */}
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-6 shadow-sm relative overflow-hidden flex flex-col justify-between">
+              {/* <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-6 shadow-sm relative overflow-hidden flex flex-col justify-between">
                 <div className="absolute -right-2 -bottom-2 opacity-10 select-none">
                   <Award className="w-32 h-32 text-blue-600" />
                 </div>
                 <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">Keep Going!</p>
                 <div className="mt-2 mb-2">
-                   <Award className="w-10 h-10 text-blue-600 dark:text-blue-400" />
+                  <Award className="w-10 h-10 text-blue-600 dark:text-blue-400" />
                 </div>
                 <p className="text-sm font-medium text-blue-700 dark:text-blue-400 leading-snug">Excellent clinical progress.</p>
-              </div>
+              </div> */}
 
-              {/* This Week */}
-              <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-                <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-1">This Week</p>
-                <p className="text-4xl font-bold text-emerald-600 dark:text-emerald-400">{weekAccuracyAllGames.toFixed(0)}%</p>
-                <p className="text-sm text-slate-500 mt-1 mb-3">Overall Score</p>
-                {isMounted && (
-                  <div className="h-10">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={weekSparklineData}>
-                        <Line type="monotone" dataKey="acc" stroke="#10B981" strokeWidth={2} dot={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </div>
+              
             </div>
 
             {/* Choose Your Game */}
@@ -2336,11 +2329,11 @@ const DashboardContent = ({
                   const playCount = sessions.length;
                   const highScore = playCount > 0 ? Math.max(...sessions.map(s => s.sessionScore || 0), 0) : 0;
                   const themes = {
-                    type1:        'from-violet-700 to-indigo-800',
+                    type1: 'from-violet-700 to-indigo-800',
                     board_drawing: 'from-blue-700 to-cyan-800',
                     shape_tracing: 'from-teal-600 to-emerald-800',
-                    fruit_basket:  'from-orange-600 to-amber-700',
-                    in_cam_game:   'from-slate-600 to-gray-800',
+                    fruit_basket: 'from-orange-600 to-amber-700',
+                    in_cam_game: 'from-slate-600 to-gray-800',
                   };
                   const grad = themes[game.type] || 'from-gray-700 to-gray-800';
                   return (
@@ -2394,22 +2387,58 @@ const DashboardContent = ({
           <div className="space-y-4">
             {/* Performance Overview */}
             <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-              <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-4">Performance</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="bg-blue-50/50 dark:bg-blue-900/10 rounded-xl p-4 border border-blue-100 dark:border-blue-900/20">
-                  <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-1">Level</p>
-                  <p className="text-2xl font-bold text-blue-900 dark:text-blue-100">{stats?.level || 1}</p>
-                </div>
-                <div className="bg-emerald-50/50 dark:bg-emerald-900/10 rounded-xl p-4 border border-emerald-100 dark:border-emerald-900/20">
-                  <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 mb-1">Score</p>
-                  <p className="text-2xl font-bold text-emerald-900 dark:text-emerald-100">{stats?.totalScore || 0}</p>
-                </div>
-                <div className="bg-slate-50/50 dark:bg-slate-900/10 rounded-xl p-4 border border-slate-100 dark:border-slate-700 col-span-2">
-                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">Total Sessions (All Games)</p>
-                  <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalSessionsAllGames}</p>
-                </div>
-              </div>
-            </div>
+  <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-4">
+    Performance
+  </h3>
+  
+  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    {/* Level Card */}
+    <div className="bg-blue-50/50 dark:bg-blue-900/10 rounded-xl p-4 border border-blue-100 dark:border-blue-900/20 flex flex-col justify-between">
+      <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider mb-1">Level</p>
+      <p className="text-3xl font-bold text-blue-900 dark:text-blue-100 tracking-tight">{stats?.level || 1}</p>
+    </div>
+    
+    {/* Score Card */}
+    <div className="bg-emerald-50/50 dark:bg-emerald-900/10 rounded-xl p-4 border border-emerald-100 dark:border-emerald-900/20 flex flex-col justify-between">
+      <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1">Score</p>
+      <p className="text-3xl font-bold text-emerald-900 dark:text-emerald-100 tracking-tight">{stats?.totalScore || 0}</p>
+    </div>
+    
+    {/* Total Sessions Card */}
+    <div className="bg-slate-50/70 dark:bg-slate-900/30 rounded-xl p-4 border border-slate-100 dark:border-slate-700 col-span-1 sm:col-span-2 flex items-center justify-between">
+      <div>
+        <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-0.5">Total Sessions</p>
+        <p className="text-xs text-slate-400 dark:text-slate-500">Across all clinical games</p>
+      </div>
+      <p className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">{totalSessionsAllGames}</p>
+    </div>
+  </div>
+
+  {/* This Week Section (Nested inside the parent card) */}
+  <div className="mt-4 bg-slate-50/50 dark:bg-slate-900/20 rounded-xl p-5 border border-slate-150 dark:border-slate-700/60 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">This Week</p>
+      <div className="flex items-baseline gap-2">
+        <p className="text-4xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight">
+          {weekAccuracyAllGames.toFixed(0)}%
+        </p>
+        {/*  */}
+      </div>
+      <p className="text-xs font-medium text-slate-400 dark:text-slate-500">Overall Accuracy</p>
+    </div>
+    
+    {/* Sparkline Container aligned beautifully right/bottom */}
+    {isMounted && (
+      <div className="h-12 flex-1 max-w-xs bg-white dark:bg-slate-800/80 rounded-lg p-1.5 border border-slate-100 dark:border-slate-700/40 shadow-inner">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={weekSparklineData} margin={{ top: 2, bottom: 2, left: 2, right: 2 }}>
+            <Line type="monotone" dataKey="acc" stroke="#10B981" strokeWidth={2.5} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    )}
+  </div>
+</div>
 
             {/* Your Doctor */}
             <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
@@ -2474,44 +2503,6 @@ const DashboardContent = ({
                 </div>
               )}
             </div> */}
-
-            {/* All Reminders */}
-            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400">Remind Me</h3>
-                <select
-                  className="text-sm text-blue-600 bg-transparent border-none focus:outline-none cursor-pointer font-semibold"
-                  value={selectedPeriod}
-                  onChange={(e) => setSelectedPeriod(e.target.value)}
-                >
-                  <option value="today">Today</option>
-                  <option value="week">This Week</option>
-                  <option value="month">This Month</option>
-                </select>
-              </div>
-              <div className="w-full bg-slate-100 dark:bg-slate-700 rounded-full h-1.5 mb-4">
-                <div
-                  className="bg-blue-600 h-1.5 rounded-full transition-all"
-                  style={{ width: `${percentage}%` }}
-                />
-              </div>
-              <div className="space-y-2 max-h-44 overflow-y-auto">
-                {activeReminders.map(r => (
-                  <ReminderItem key={r._id} reminder={r} onEdit={() => setEditingReminder(r)} onMarkDone={handleMarkDone} />
-                ))}
-                {completedReminders.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
-                    <p className="text-xs font-semibold text-slate-400 mb-2 px-2">Completed</p>
-                    {completedReminders.map(r => (
-                      <ReminderItem key={r._id} reminder={r} onEdit={() => setEditingReminder(r)} isCompleted />
-                    ))}
-                  </div>
-                )}
-                {filteredReminders.length === 0 && (
-                  <p className="text-sm text-slate-400 text-center py-4 italic">No reminders scheduled</p>
-                )}
-              </div>
-            </div>
           </div>
         </div>
       )}
@@ -2697,50 +2688,203 @@ const TopBar = ({
   toggleDarkMode,
   handleLogout,
   onToggleMobileMenu
-}) => (
-  <div className="flex justify-between items-center py-6 md:py-8">
-    <div className="flex items-center gap-2 md:gap-4">
-      {onToggleMobileMenu && (
-        <button 
-          onClick={onToggleMobileMenu}
-          className="md:hidden p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+}) => {
+  const { user } = useAuth();
+  const [showReminders, setShowReminders] = useState(false);
+  const [reminders, setReminders] = useState([]);
+  const [selectedPeriod, setSelectedPeriod] = useState("today");
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setShowReminders(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  const fetchReminders = React.useCallback(async () => {
+    if (!user?._id) return;
+    try {
+      const res = await reminderService.listForPatient(user._id);
+      setReminders(res.reminders || []);
+    } catch (err) {
+      console.error("Failed to load reminders in TopBar:", err);
+    }
+  }, [user?._id]);
+
+  useEffect(() => {
+    if (showReminders) {
+      fetchReminders();
+    }
+  }, [showReminders, fetchReminders]);
+
+  const handleMarkDone = async (reminderId) => {
+    try {
+      await reminderService.complete(reminderId);
+      fetchReminders();
+    } catch (err) {
+      console.error("Failed to complete reminder:", err);
+    }
+  };
+
+  // Filter reminders based on period
+  const filteredReminders = useMemo(() => {
+    const now = new Date();
+    const todayStr = now.toISOString().split("T")[0];
+    let start = todayStr;
+    let end;
+
+    if (selectedPeriod === "today") {
+      end = todayStr;
+    } else if (selectedPeriod === "week") {
+      const dayOfWeek = now.getDay(); // 0 = Sunday
+      const daysToSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+      const endOfWeek = new Date(now);
+      endOfWeek.setDate(now.getDate() + daysToSunday);
+      end = endOfWeek.toISOString().split("T")[0];
+    } else {
+      // month
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      end = endOfMonth.toISOString().split("T")[0];
+    }
+
+    return reminders
+      .filter((r) => {
+        const rDateStr = new Date(r.date).toISOString().split("T")[0];
+        return rDateStr >= start && rDateStr <= end;
+      })
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
+  }, [reminders, selectedPeriod]);
+
+  const activeReminders = filteredReminders.filter((r) => r.status !== "completed");
+  const completedReminders = filteredReminders.filter((r) => r.status === "completed");
+  const percentage = filteredReminders.length > 0
+    ? Math.round((completedReminders.length / filteredReminders.length) * 100)
+    : 0;
+
+  return (
+    <div className="flex justify-between items-center py-6 md:py-8 relative">
+      <div className="flex items-center gap-2 md:gap-4">
+        {onToggleMobileMenu && (
+          <button
+            onClick={onToggleMobileMenu}
+            className="md:hidden p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+          >
+            <Menu size={26} />
+          </button>
+        )}
+        <div className="w-2 h-8 bg-primary-500 rounded-full hidden md:block"></div>
+        <h2 className="text-xl md:text-2xl font-black dark:text-white tracking-widest uppercase truncate max-w-[150px] sm:max-w-xs">
+          {activeSection}
+        </h2>
+      </div>
+
+      <div className="flex items-center gap-3 md:gap-4 relative z-40">
+        <DarkModeToggle isDarkMode={isDarkMode} setIsDarkMode={toggleDarkMode} />
+
+        <div className="relative" ref={dropdownRef}>
+          <button
+            onClick={() => setShowReminders(!showReminders)}
+            className="p-3.5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-gray-500 dark:text-gray-400 hover:border-primary-500/50 transition-all shadow-sm relative"
+          >
+            <Bell size={20} />
+            {activeReminders.length > 0 && (
+              <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-gray-900"></span>
+            )}
+          </button>
+
+          {/* Reminders Popover Dropdown */}
+          {showReminders && (
+            <div className="absolute right-0 mt-3 w-80 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl p-5 shadow-2xl z-50 animate-in fade-in slide-in-from-top-3 duration-200">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-sm font-bold text-[var(--color-text-primary)] uppercase tracking-wider">
+                  Remind Me
+                </h3>
+                <select
+                  className="text-xs text-[var(--color-primary)] bg-transparent border-none focus:outline-none cursor-pointer font-bold"
+                  value={selectedPeriod}
+                  onChange={(e) => setSelectedPeriod(e.target.value)}
+                >
+                  <option value="today">Today</option>
+                  <option value="week">This Week</option>
+                  <option value="month">This Month</option>
+                </select>
+              </div>
+
+              {/* Progress */}
+              <div className="mb-4">
+                <div className="flex justify-between text-[10px] font-bold text-[var(--color-text-secondary)] mb-1">
+                  <span>COMPLETION RATE</span>
+                  <span>{percentage}%</span>
+                </div>
+                <div className="w-full bg-[var(--color-bg-sunken)] rounded-full h-2">
+                  <div
+                    className="bg-[var(--color-primary)] h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${percentage}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* List */}
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {activeReminders.map((r) => (
+                  <div
+                    key={r._id}
+                    onClick={() => handleMarkDone(r._id)}
+                    className="p-3 bg-[var(--color-bg-sunken)] hover:bg-[var(--color-primary-subtle)] rounded-xl flex items-start gap-3 transition cursor-pointer"
+                  >
+                    <Square className="w-4 h-4 mt-0.5 text-[var(--color-text-muted)] flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-[var(--color-text-primary)] leading-tight">{r.title}</p>
+                      <p className="text-[10px] text-[var(--color-text-secondary)] mt-0.5">{r.time} · {r.text || 'Therapy Event'}</p>
+                    </div>
+                  </div>
+                ))}
+
+                {completedReminders.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-150 dark:border-gray-700">
+                    <p className="text-[10px] font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">Completed</p>
+                    {completedReminders.map((r) => (
+                      <div
+                        key={r._id}
+                        className="p-3 bg-gray-50/50 dark:bg-gray-800/30 rounded-xl flex items-start gap-3 opacity-60"
+                      >
+                        <CheckSquare className="w-4 h-4 mt-0.5 text-[var(--color-success)] flex-shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-[var(--color-text-primary)] line-through leading-tight">{r.title}</p>
+                          <p className="text-[9px] text-[var(--color-text-secondary)]">{r.time} · {r.text || 'Therapy Event'}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {filteredReminders.length === 0 && (
+                  <div className="text-center py-6 text-xs text-[var(--color-text-muted)] italic font-medium">
+                    No reminders scheduled.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button
+          onClick={handleLogout}
+          className="flex items-center gap-2 px-3 py-2 md:px-5 md:py-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-2xl font-bold text-sm hover:bg-red-100 dark:hover:bg-red-900/40 transition-all md:ml-2"
         >
-          <Menu size={26} />
+          <LogOut size={18} />
+          <span className="hidden sm:inline">Logout</span>
         </button>
-      )}
-      <div className="w-2 h-8 bg-primary-500 rounded-full hidden md:block"></div>
-      <h2 className="text-xl md:text-2xl font-black dark:text-white tracking-widest uppercase truncate max-w-[150px] sm:max-w-xs">
-        {activeSection}
-      </h2>
+      </div>
     </div>
-
-    <div className="flex items-center gap-3 md:gap-4">
-      {/* <div className="relative group">
-        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-primary-500 transition-colors" size={18} />
-        <input
-          type="text"
-          placeholder="Global search..."
-          className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-gray-800 dark:text-white pl-12 pr-6 py-3 rounded-[1.5rem] text-sm font-bold focus:ring-4 focus:ring-primary-500/10 transition-all outline-none w-64 placeholder:text-gray-400"
-        />
-      </div> */}
-
-      <DarkModeToggle isDarkMode={isDarkMode} setIsDarkMode={toggleDarkMode} />
-
-      <button className="p-3.5 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 text-gray-500 dark:text-gray-400 hover:border-primary-500/50 transition-all shadow-sm relative">
-        <Bell size={20} />
-        <span className="absolute top-3 right-3 w-2 h-2 bg-red-500 rounded-full border-2 border-white dark:border-gray-900"></span>
-      </button>
-
-      <button
-        onClick={handleLogout}
-        className="flex items-center gap-2 px-3 py-2 md:px-5 md:py-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-2xl font-bold text-sm hover:bg-red-100 dark:hover:bg-red-900/40 transition-all md:ml-2"
-      >
-        <LogOut size={18} />
-        <span className="hidden sm:inline">Logout</span>
-      </button>
-    </div>
-  </div>
-);
+  );
+};
 
 // Functional component for Medical Records
 const RecordContent = ({ userData, isDarkMode }) => {

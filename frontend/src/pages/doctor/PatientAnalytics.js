@@ -666,7 +666,7 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
 const GAMES_LIST = [
   {
     type: "type1",
-    name: "Piano Reaction Game",
+    name: "Piano Reaction",
     path: "/piano-reaction",
     desc: "Tests and improves cognitive reaction speeds by tapping highlighted piano keys in response to stimuli.",
     clinicalFocus: "Cognitive processing speed, manual dexterity, and hand-eye coordination.",
@@ -688,7 +688,7 @@ const GAMES_LIST = [
   },
   {
     type: "fruit_basket",
-    name: "Arm – Fruit Fetch",
+    name: "Fruit Fetch",
     path: "/fruit-basket",
     desc: "Grasp and move falling fruits into a basket using full arm gestures to improve range of motion.",
     clinicalFocus: "Gross motor coordination, shoulder/elbow articulation, and spatial reaching velocity.",
