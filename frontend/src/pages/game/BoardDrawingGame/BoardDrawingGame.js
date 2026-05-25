@@ -5,20 +5,35 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import gameSessionBuffer from "../../../services/gameSessionBuffer";
 import SaveExitButton from "../SaveExitButton";
-import { COORD_SAMPLE_INTERVAL_MS, MAX_COORDS_PER_SESSION } from "../../../constants";
+import {
+  COORD_SAMPLE_INTERVAL_MS,
+  MAX_COORDS_PER_SESSION,
+  DEFAULT_SESSION_SECONDS,
+  BOARD_DRAWING_CALIBRATION_SECONDS,
+  BOARD_DRAWING_NUM_SHAPE_POINTS,
+  BOARD_DRAWING_PICK_DISTANCE,
+  BOARD_DRAWING_TRACE_TOLERANCE,
+  BOARD_DRAWING_SCORE_PER_SHAPE,
+  BOARD_DRAWING_MIN_COMPLETION,
+  BOARD_DRAWING_SMOOTH_ALPHA,
+  BOARD_DRAWING_STABLE_FRAMES,
+  BOARD_DRAWING_DRAW_FPS,
+  BOARD_DRAWING_DEFAULT_SAFE_ZONE_RADIUS,
+  BOARD_DRAWING_DEFAULT_WARNING_ZONE_RADIUS,
+} from "../../../constants";
 import * as GameStorage from "./gameStorage";
 // ==================== CONFIGURATION ====================
 const CONFIG = {
-  SESSION_SECONDS: 300,
-  CALIBRATION_SECONDS: 7,
-  NUM_SHAPE_POINTS: 20,
-  PICK_DISTANCE: 0.08,
-  TRACE_TOLERANCE: 0.05,
-  SCORE_PER_SHAPE: 10,
-  MIN_COMPLETION: 0.8, // 80% points hit for success
-  SMOOTH_ALPHA: 0.7,
-  STABLE_FRAMES: 2,
-  DRAW_FPS: 30,
+  SESSION_SECONDS: DEFAULT_SESSION_SECONDS,
+  CALIBRATION_SECONDS: BOARD_DRAWING_CALIBRATION_SECONDS,
+  NUM_SHAPE_POINTS: BOARD_DRAWING_NUM_SHAPE_POINTS,
+  PICK_DISTANCE: BOARD_DRAWING_PICK_DISTANCE,
+  TRACE_TOLERANCE: BOARD_DRAWING_TRACE_TOLERANCE,
+  SCORE_PER_SHAPE: BOARD_DRAWING_SCORE_PER_SHAPE,
+  MIN_COMPLETION: BOARD_DRAWING_MIN_COMPLETION,
+  SMOOTH_ALPHA: BOARD_DRAWING_SMOOTH_ALPHA,
+  STABLE_FRAMES: BOARD_DRAWING_STABLE_FRAMES,
+  DRAW_FPS: BOARD_DRAWING_DRAW_FPS,
 };
 
 // ==================== SHAPE GENERATION ====================
@@ -206,10 +221,10 @@ const BoardDrawingGame = () => {
     handPoseModeRef.current = newMode;
   };
 
-  const [safeZoneRadius, setSafeZoneRadius] = useState(0.025);
-  const safeZoneRadiusRef = useRef(0.025);
-  const [warningZoneRadius, setWarningZoneRadius] = useState(0.05);
-  const warningZoneRadiusRef = useRef(0.05);
+  const [safeZoneRadius, setSafeZoneRadius] = useState(BOARD_DRAWING_DEFAULT_SAFE_ZONE_RADIUS);
+  const safeZoneRadiusRef = useRef(BOARD_DRAWING_DEFAULT_SAFE_ZONE_RADIUS);
+  const [warningZoneRadius, setWarningZoneRadius] = useState(BOARD_DRAWING_DEFAULT_WARNING_ZONE_RADIUS);
+  const warningZoneRadiusRef = useRef(BOARD_DRAWING_DEFAULT_WARNING_ZONE_RADIUS);
 
   // Hand State
   const [leftHandVisible, setLeftHandVisible] = useState(false);
