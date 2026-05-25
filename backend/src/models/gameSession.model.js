@@ -1,5 +1,10 @@
 const mongoose = require('mongoose');
 
+const jointCoordinateSchema = new mongoose.Schema({
+  x: Number,
+  y: Number
+}, { _id: false });
+
 const coordinateSchema = new mongoose.Schema({
   x: Number,
   y: Number,
@@ -7,7 +12,14 @@ const coordinateSchema = new mongoose.Schema({
   screenY: Number,
   timestamp: Number,
   zone: String,
-  color: String
+  color: String,
+  leftShoulder: jointCoordinateSchema,
+  rightShoulder: jointCoordinateSchema,
+  leftElbow: jointCoordinateSchema,
+  rightElbow: jointCoordinateSchema,
+  leftWrist: jointCoordinateSchema,
+  rightWrist: jointCoordinateSchema,
+  palm: jointCoordinateSchema
 }, { _id: false });
 
 const boardDrawingAttemptSchema = new mongoose.Schema({

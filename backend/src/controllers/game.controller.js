@@ -8,6 +8,14 @@ const toNumber = (value, fallback = undefined) => {
   return Number.isFinite(number) ? number : fallback;
 };
 
+const normalizeJoint = (joint) => {
+  if (!joint || joint.x === undefined || joint.y === undefined) return undefined;
+  return {
+    x: toNumber(joint.x, 0),
+    y: toNumber(joint.y, 0)
+  };
+};
+
 const normalizePoint = (point) => ({
   x: toNumber(point?.x, 0),
   y: toNumber(point?.y, 0),
@@ -15,7 +23,14 @@ const normalizePoint = (point) => ({
   screenY: toNumber(point?.screenY),
   timestamp: toNumber(point?.timestamp, 0),
   zone: point?.zone,
-  color: point?.color
+  color: point?.color,
+  leftShoulder: normalizeJoint(point?.leftShoulder),
+  rightShoulder: normalizeJoint(point?.rightShoulder),
+  leftElbow: normalizeJoint(point?.leftElbow),
+  rightElbow: normalizeJoint(point?.rightElbow),
+  leftWrist: normalizeJoint(point?.leftWrist),
+  rightWrist: normalizeJoint(point?.rightWrist),
+  palm: normalizeJoint(point?.palm)
 });
 
 const normalizePath = (path) => {

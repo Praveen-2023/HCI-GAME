@@ -11,6 +11,16 @@ const getAbsoluteCoords = (point, canvasWidth, canvasHeight) => {
   return { ...point, absX: x, absY: y };
 };
 
+const getAbsoluteJoint = (joint, canvasWidth, canvasHeight) => {
+  if (!joint || typeof joint.x !== "number" || typeof joint.y !== "number") return null;
+  return {
+    x: joint.x,
+    y: joint.y,
+    absX: joint.x * canvasWidth,
+    absY: joint.y * canvasHeight,
+  };
+};
+
 const pathPoints = (path) =>
   path.map((point) => `${point.absX},${point.absY}`).join(" ");
 
@@ -43,6 +53,14 @@ const AttemptReplayCard = ({ attempt, index }) => {
   const drawnPath = useMemo(() =>
     validPath(attempt?.drawnPath).map((p) => {
       const abs = getAbsoluteCoords(p, canvasWidth, canvasHeight);
+      abs.leftShoulder = getAbsoluteJoint(p.leftShoulder, canvasWidth, canvasHeight);
+      abs.rightShoulder = getAbsoluteJoint(p.rightShoulder, canvasWidth, canvasHeight);
+      abs.leftElbow = getAbsoluteJoint(p.leftElbow, canvasWidth, canvasHeight);
+      abs.rightElbow = getAbsoluteJoint(p.rightElbow, canvasWidth, canvasHeight);
+      abs.leftWrist = getAbsoluteJoint(p.leftWrist, canvasWidth, canvasHeight);
+      abs.rightWrist = getAbsoluteJoint(p.rightWrist, canvasWidth, canvasHeight);
+      abs.palm = getAbsoluteJoint(p.palm, canvasWidth, canvasHeight);
+
       if (!abs.zone || !abs.color) {
         if (targetPath.length < 2) {
           abs.zone = 'safe';
@@ -90,7 +108,94 @@ const AttemptReplayCard = ({ attempt, index }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [showColorZones, setShowColorZones] = useState(false);
+  const [showSkeleton, setShowSkeleton] = useState(false);
+  const [skeletonLayout, setSkeletonLayout] = useState("split-right"); // 'overlay', 'split-right', 'split-bottom'
   const timerRef = useRef(null);
+
+  const jointPathPoints = (path, jointKey) => {
+    return path
+      .map((p) => p[jointKey])
+      .filter((j) => j && typeof j.absX === "number" && typeof j.absY === "number")
+      .map((j) => `${j.absX},${j.absY}`)
+      .join(" ");
+  };
+
+  const renderSkeletonElements = (currentPoint, playedPath, isActiveLeft, scale) => {
+    if (!currentPoint) return null;
+    const activeShoulder = isActiveLeft ? currentPoint.leftShoulder : currentPoint.rightShoulder;
+    const activeElbow = isActiveLeft ? currentPoint.leftElbow : currentPoint.rightElbow;
+    const activeWrist = isActiveLeft ? currentPoint.leftWrist : currentPoint.rightWrist;
+    return (
+      <g>
+        {/* Left Shoulder Trail (Purple) */}
+        <polyline points={jointPathPoints(playedPath, 'leftShoulder')} fill="none" stroke="#a855f7" strokeWidth={1.2 * scale} strokeDasharray="2,2" strokeOpacity="0.5" strokeLinecap="round" strokeLinejoin="round" />
+        {/* Right Shoulder Trail (Purple) */}
+        <polyline points={jointPathPoints(playedPath, 'rightShoulder')} fill="none" stroke="#8b5cf6" strokeWidth={1.2 * scale} strokeDasharray="2,2" strokeOpacity="0.5" strokeLinecap="round" strokeLinejoin="round" />
+        {/* Active Elbow Trail (Blue) */}
+        <polyline points={jointPathPoints(playedPath, isActiveLeft ? 'leftElbow' : 'rightElbow')} fill="none" stroke="#3b82f6" strokeWidth={1.2 * scale} strokeDasharray="2,2" strokeOpacity="0.5" strokeLinecap="round" strokeLinejoin="round" />
+        {/* Active Wrist Trail (Orange) */}
+        <polyline points={jointPathPoints(playedPath, isActiveLeft ? 'leftWrist' : 'rightWrist')} fill="none" stroke="#f97316" strokeWidth={1.2 * scale} strokeDasharray="2,2" strokeOpacity="0.5" strokeLinecap="round" strokeLinejoin="round" />
+        {/* Palm Trail (Yellow) */}
+        <polyline points={jointPathPoints(playedPath, 'palm')} fill="none" stroke="#eab308" strokeWidth={1.2 * scale} strokeDasharray="2,2" strokeOpacity="0.5" strokeLinecap="round" strokeLinejoin="round" />
+
+        {/* Collarbone connecting left and right shoulder */}
+        {currentPoint.leftShoulder && currentPoint.rightShoulder && (
+          <line x1={currentPoint.leftShoulder.absX} y1={currentPoint.leftShoulder.absY} x2={currentPoint.rightShoulder.absX} y2={currentPoint.rightShoulder.absY} stroke="#6b7280" strokeWidth={3 * scale} strokeLinecap="round" />
+        )}
+        {/* Active Arm Bone: Shoulder to Elbow */}
+        {activeShoulder && activeElbow && (
+          <line x1={activeShoulder.absX} y1={activeShoulder.absY} x2={activeElbow.absX} y2={activeElbow.absY} stroke="#8b5cf6" strokeWidth={2.4 * scale} strokeLinecap="round" />
+        )}
+        {/* Forearm Bone: Elbow to Wrist */}
+        {activeElbow && activeWrist && (
+          <line x1={activeElbow.absX} y1={activeElbow.absY} x2={activeWrist.absX} y2={activeWrist.absY} stroke="#3b82f6" strokeWidth={2.4 * scale} strokeLinecap="round" />
+        )}
+        {/* Hand Connection: Wrist to Palm */}
+        {activeWrist && currentPoint.palm && (
+          <line x1={activeWrist.absX} y1={activeWrist.absY} x2={currentPoint.palm.absX} y2={currentPoint.palm.absY} stroke="#f97316" strokeWidth={2.4 * scale} strokeLinecap="round" />
+        )}
+
+        {/* Joint node dots */}
+        {currentPoint.leftShoulder && (
+          <circle cx={currentPoint.leftShoulder.absX} cy={currentPoint.leftShoulder.absY} r={4.5 * scale} fill="#a855f7" stroke="#fff" strokeWidth={1 * scale} />
+        )}
+        {currentPoint.rightShoulder && (
+          <circle cx={currentPoint.rightShoulder.absX} cy={currentPoint.rightShoulder.absY} r={4.5 * scale} fill="#8b5cf6" stroke="#fff" strokeWidth={1 * scale} />
+        )}
+        {activeElbow && (
+          <circle cx={activeElbow.absX} cy={activeElbow.absY} r={4 * scale} fill="#3b82f6" stroke="#fff" strokeWidth={1 * scale} />
+        )}
+        {activeWrist && (
+          <circle cx={activeWrist.absX} cy={activeWrist.absY} r={4 * scale} fill="#f97316" stroke="#fff" strokeWidth={1 * scale} />
+        )}
+        {currentPoint.palm && (
+          <circle cx={currentPoint.palm.absX} cy={currentPoint.palm.absY} r={5 * scale} fill="#eab308" stroke="#fff" strokeWidth={1 * scale} />
+        )}
+      </g>
+    );
+  };
+
+  const isActiveLeft = useMemo(() => {
+    let leftVotes = 0;
+    let rightVotes = 0;
+    validPath(attempt?.drawnPath).forEach((p) => {
+      if (p.palm && p.leftWrist && p.rightWrist) {
+        const distL = Math.hypot(p.palm.x - p.leftWrist.x, p.palm.y - p.leftWrist.y);
+        const distR = Math.hypot(p.palm.x - p.rightWrist.x, p.palm.y - p.rightWrist.y);
+        if (distL < distR) leftVotes++;
+        else rightVotes++;
+      } else if (p.leftWrist) {
+        leftVotes++;
+      } else if (p.rightWrist) {
+        rightVotes++;
+      }
+    });
+    if (leftVotes === 0 && rightVotes === 0) {
+      const activeHandLabel = attempt?.hand || attempt?.shapeType || "Right";
+      return activeHandLabel.toLowerCase().includes("left");
+    }
+    return leftVotes > rightVotes;
+  }, [attempt]);
 
   const calculatedQuality = useMemo(() => {
     if (attempt?.traceQuality !== undefined) return attempt.traceQuality;
@@ -176,142 +281,190 @@ const AttemptReplayCard = ({ attempt, index }) => {
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_220px] gap-4">
         <div>
-          <div
-            className="relative w-full bg-[#a8d9a8] rounded-xl overflow-hidden border border-green-200 shadow-inner"
-            style={{ aspectRatio: `${canvasWidth} / ${canvasHeight}` }}
-          >
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_25%,rgba(255,255,255,0.34),transparent_45%),linear-gradient(135deg,rgba(255,255,255,0.18),rgba(74,163,81,0.16))]" />
-            <svg
-              viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
-              className="w-full h-full p-5"
-              preserveAspectRatio="xMidYMid meet"
+          <div className={`grid grid-cols-1 ${showSkeleton && skeletonLayout === "split-right" ? "md:grid-cols-2" : ""} gap-4`}>
+            {/* Canvas 1: Board Drawing View */}
+            <div
+              className="relative w-full bg-[#a8d9a8] rounded-xl overflow-hidden border border-green-200 shadow-inner"
               style={{ aspectRatio: `${canvasWidth} / ${canvasHeight}` }}
             >
-              {showColorZones && targetPath.length > 1 && (
-                <>
-                  {/* Warning Zone Halo */}
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_25%,rgba(255,255,255,0.34),transparent_45%),linear-gradient(135deg,rgba(255,255,255,0.18),rgba(74,163,81,0.16))]" />
+              <svg
+                viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
+                className="w-full h-full p-5"
+                preserveAspectRatio="xMidYMid meet"
+                style={{ aspectRatio: `${canvasWidth} / ${canvasHeight}` }}
+              >
+                {showColorZones && targetPath.length > 1 && (
+                  <>
+                    {/* Warning Zone Halo */}
+                    <polyline
+                      points={pathPoints(targetPath)}
+                      fill="none"
+                      stroke="rgba(252, 196, 25, 0.25)"
+                      strokeWidth={warningZoneRadius * 200 * scale}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    {/* Safe Zone Halo */}
+                    <polyline
+                      points={pathPoints(targetPath)}
+                      fill="none"
+                      stroke="rgba(81, 207, 102, 0.4)"
+                      strokeWidth={safeZoneRadius * 200 * scale}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </>
+                )}
+                {targetPath.length > 1 && (
                   <polyline
                     points={pathPoints(targetPath)}
                     fill="none"
-                    stroke="rgba(252, 196, 25, 0.25)"
-                    strokeWidth={warningZoneRadius * 200 * scale}
+                    stroke="#2f2f35"
+                    strokeWidth={1.4 * scale}
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   />
-                  {/* Safe Zone Halo */}
-                  <polyline
-                    points={pathPoints(targetPath)}
-                    fill="none"
-                    stroke="rgba(81, 207, 102, 0.4)"
-                    strokeWidth={safeZoneRadius * 200 * scale}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </>
-              )}
-              {targetPath.length > 1 && (
-                <polyline
-                  points={pathPoints(targetPath)}
-                  fill="none"
-                  stroke="#2f2f35"
-                  strokeWidth={1.4 * scale}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              )}
-              {showColorZones ? (
-                drawnPath.length > 1 &&
-                drawnPath.slice(1).map((p2, idx) => {
-                  const p1 = drawnPath[idx];
-                  return (
-                    <line
-                      key={idx}
-                      x1={p1.absX}
-                      y1={p1.absY}
-                      x2={p2.absX}
-                      y2={p2.absY}
-                      stroke={p2.color || "#ff9500"}
+                )}
+                {showColorZones ? (
+                  drawnPath.length > 1 &&
+                  drawnPath.slice(1).map((p2, idx) => {
+                    const p1 = drawnPath[idx];
+                    return (
+                      <line
+                        key={idx}
+                        x1={p1.absX}
+                        y1={p1.absY}
+                        x2={p2.absX}
+                        y2={p2.absY}
+                        stroke={p2.color || "#ff9500"}
+                        strokeWidth={0.7 * scale}
+                        strokeOpacity="0.35"
+                        strokeLinecap="round"
+                      />
+                    );
+                  })
+                ) : (
+                  drawnPath.length > 1 && (
+                    <polyline
+                      points={pathPoints(drawnPath)}
+                      fill="none"
+                      stroke="#ff9500"
                       strokeWidth={0.7 * scale}
                       strokeOpacity="0.35"
                       strokeLinecap="round"
+                      strokeLinejoin="round"
                     />
-                  );
-                })
-              ) : (
-                drawnPath.length > 1 && (
-                  <polyline
-                    points={pathPoints(drawnPath)}
-                    fill="none"
-                    stroke="#ff9500"
-                    strokeWidth={0.7 * scale}
-                    strokeOpacity="0.35"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                )
-              )}
-              {showColorZones ? (
-                playedPath.length > 1 &&
-                playedPath.slice(1).map((p2, idx) => {
-                  const p1 = playedPath[idx];
-                  return (
-                    <line
-                      key={idx}
-                      x1={p1.absX}
-                      y1={p1.absY}
-                      x2={p2.absX}
-                      y2={p2.absY}
-                      stroke={p2.color || "#ff9500"}
+                  )
+                )}
+                {showColorZones ? (
+                  playedPath.length > 1 &&
+                  playedPath.slice(1).map((p2, idx) => {
+                    const p1 = playedPath[idx];
+                    return (
+                      <line
+                        key={idx}
+                        x1={p1.absX}
+                        y1={p1.absY}
+                        x2={p2.absX}
+                        y2={p2.absY}
+                        stroke={p2.color || "#ff9500"}
+                        strokeWidth={2.4 * scale}
+                        strokeLinecap="round"
+                      />
+                    );
+                  })
+                ) : (
+                  playedPath.length > 1 && (
+                    <polyline
+                      points={pathPoints(playedPath)}
+                      fill="none"
+                      stroke="#ff9500"
                       strokeWidth={2.4 * scale}
                       strokeLinecap="round"
+                      strokeLinejoin="round"
                     />
-                  );
-                })
-              ) : (
-                playedPath.length > 1 && (
-                  <polyline
-                    points={pathPoints(playedPath)}
-                    fill="none"
-                    stroke="#ff9500"
-                    strokeWidth={2.4 * scale}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                )
-              )}
-              {drawnPath[0] && (
-                <circle cx={drawnPath[0].absX} cy={drawnPath[0].absY} r={1.5 * scale} fill="#2563EB" />
-              )}
-              {drawnPath[drawnPath.length - 1] && (
-                <circle cx={drawnPath[drawnPath.length - 1].absX} cy={drawnPath[drawnPath.length - 1].absY} r={1.5 * scale} fill="#DC2626" />
-              )}
-              {currentPoint && (
-                <>
-                  <circle cx={currentPoint.absX} cy={currentPoint.absY} r={3.4 * scale} fill={showColorZones ? (currentPoint.color || "#ff9500") : "#ff9500"} fillOpacity="0.25" />
-                  <circle cx={currentPoint.absX} cy={currentPoint.absY} r={1.5 * scale} fill={showColorZones ? (currentPoint.color || "#ff9500") : "#ff9500"} stroke="#2f2f35" strokeWidth={0.35 * scale} />
-                </>
-              )}
-            </svg>
+                  )
+                )}
+                {drawnPath[0] && (
+                  <circle cx={drawnPath[0].absX} cy={drawnPath[0].absY} r={1.5 * scale} fill="#2563EB" />
+                )}
+                {drawnPath[drawnPath.length - 1] && (
+                  <circle cx={drawnPath[drawnPath.length - 1].absX} cy={drawnPath[drawnPath.length - 1].absY} r={1.5 * scale} fill="#DC2626" />
+                )}
+                {currentPoint && (
+                  <>
+                    <circle cx={currentPoint.absX} cy={currentPoint.absY} r={3.4 * scale} fill={showColorZones ? (currentPoint.color || "#ff9500") : "#ff9500"} fillOpacity="0.25" />
+                    <circle cx={currentPoint.absX} cy={currentPoint.absY} r={1.5 * scale} fill={showColorZones ? (currentPoint.color || "#ff9500") : "#ff9500"} stroke="#2f2f35" strokeWidth={0.35 * scale} />
+                  </>
+                )}
+                {/* Overlay Skeleton elements inside Canvas 1 if Layout mode is overlay */}
+                {showSkeleton && skeletonLayout === "overlay" && renderSkeletonElements(currentPoint, playedPath, isActiveLeft, scale)}
+              </svg>
 
-            {showColorZones ? (
-              <div className="absolute left-3 top-3 flex flex-wrap gap-2 rounded-lg bg-white/80 px-2 py-1 text-[10px] font-black text-gray-700 shadow-sm border border-white/60">
-                <span className="flex items-center gap-1"><span className="h-0.5 w-4 bg-[#2f2f35]" /> Target</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#51cf66]" /> Safe</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#fcc419]" /> Warning</span>
-                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#ff6b6b]" /> Danger</span>
+              <div className="absolute left-3 top-3 flex flex-col gap-1.5 rounded-lg bg-white/80 p-2 text-[10px] font-black text-gray-700 shadow-sm border border-white/60">
+                <div className="flex gap-2">
+                  <span className="flex items-center gap-1"><span className="h-0.5 w-4 bg-[#2f2f35]" /> Target</span>
+                  {showColorZones ? (
+                    <>
+                      <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#51cf66]" /> Safe</span>
+                      <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#fcc419]" /> Warning</span>
+                      <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#ff6b6b]" /> Danger</span>
+                    </>
+                  ) : (
+                    <span className="flex items-center gap-1"><span className="h-0.5 w-4 bg-[#ff9500]" /> User</span>
+                  )}
+                </div>
+                {showSkeleton && skeletonLayout === "overlay" && (
+                  <div className="flex gap-2 border-t border-gray-300/60 pt-1.5 mt-0.5 flex-wrap max-w-[280px]">
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#a855f7]" /> L-Shld</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#8b5cf6]" /> R-Shld</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#3b82f6]" /> Elbow</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#f97316]" /> Wrist</span>
+                    <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#eab308]" /> Palm</span>
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="absolute left-3 top-3 flex gap-2 rounded-lg bg-white/80 px-2 py-1 text-[10px] font-black text-gray-700 shadow-sm border border-white/60">
-                <span className="flex items-center gap-1"><span className="h-0.5 w-4 bg-[#2f2f35]" /> Target</span>
-                <span className="flex items-center gap-1"><span className="h-0.5 w-4 bg-[#ff9500]" /> User</span>
+              <div className="absolute bottom-3 right-3 rounded-lg bg-white/90 px-2 py-1 text-[10px] font-mono text-gray-600 shadow-sm border border-gray-200">
+                Frame {safeIdx + 1}/{drawnPath.length}
+              </div>
+            </div>
+
+            {/* Canvas 2: Skeleton Posture View (Rendered for split-right and split-bottom layouts) */}
+            {showSkeleton && skeletonLayout !== "overlay" && (
+              <div
+                className="relative w-full bg-gray-950 rounded-xl overflow-hidden border border-gray-800 shadow-inner"
+                style={{
+                  aspectRatio: `${canvasWidth} / ${canvasHeight}`,
+                  backgroundImage: 'radial-gradient(rgba(255, 255, 255, 0.12) 1px, transparent 0)',
+                  backgroundSize: '16px 16px'
+                }}
+              >
+                <div className="absolute right-3 top-3 px-2 py-0.5 rounded bg-gray-800/80 border border-gray-700 text-[9px] font-black tracking-wider uppercase text-gray-300">
+                  🦴 Body Posture Analysis ({skeletonLayout === "split-right" ? "Split Right" : "Split Bottom"})
+                </div>
+
+                <svg
+                  viewBox={`0 0 ${canvasWidth} ${canvasHeight}`}
+                  className="w-full h-full p-5"
+                  preserveAspectRatio="xMidYMid meet"
+                  style={{ aspectRatio: `${canvasWidth} / ${canvasHeight}` }}
+                >
+                  {renderSkeletonElements(currentPoint, playedPath, isActiveLeft, scale)}
+                </svg>
+
+                <div className="absolute left-3 top-3 flex gap-2 rounded bg-black/60 p-1.5 text-[9px] font-black text-white border border-gray-800">
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#a855f7]" /> L-Shld</span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#8b5cf6]" /> R-Shld</span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#3b82f6]" /> Elbow</span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#f97316]" /> Wrist</span>
+                  <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#eab308]" /> Palm</span>
+                </div>
               </div>
             )}
-            <div className="absolute bottom-3 right-3 rounded-lg bg-white/90 px-2 py-1 text-[10px] font-mono text-gray-600 shadow-sm border border-gray-200">
-              {safeIdx + 1}/{drawnPath.length}
-            </div>
           </div>
 
-          <div className="mt-3 flex items-center gap-3">
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
             <button
               type="button"
               onClick={() => setIsPlaying(!isPlaying)}
@@ -337,6 +490,29 @@ const AttemptReplayCard = ({ attempt, index }) => {
             >
               🌈 Color Trajectory: {showColorZones ? "ON" : "OFF"}
             </button>
+            <button
+              type="button"
+              onClick={() => setShowSkeleton(!showSkeleton)}
+              className={`px-3 py-2 rounded-xl text-xs font-black transition-all active:scale-95 ${
+                showSkeleton ? "bg-purple-600 text-white" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700"
+              }`}
+            >
+              🦴 Joint Skeleton: {showSkeleton ? "ON" : "OFF"}
+            </button>
+            {showSkeleton && (
+              <div className="flex items-center gap-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-3 py-2 rounded-xl">
+                <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">Layout:</span>
+                <select
+                  value={skeletonLayout}
+                  onChange={(e) => setSkeletonLayout(e.target.value)}
+                  className="bg-transparent text-xs font-black dark:text-white outline-none cursor-pointer"
+                >
+                  <option value="overlay">Overlay</option>
+                  <option value="split-right">Split Right</option>
+                  <option value="split-bottom">Split Bottom</option>
+                </select>
+              </div>
+            )}
             <input
               type="range"
               min="0"

@@ -325,6 +325,33 @@ const BoardDrawingGame = () => {
   }, []);
   const makeTracePoint = useCallback((point, zone = "safe", color = "#51cf66") => {
     const canvas = getGameCanvasDimensions();
+    const handState = handStateRef.current;
+    const pose = lastPoseResultsRef.current;
+
+    let leftShoulder = null;
+    let rightShoulder = null;
+    let leftElbow = null;
+    let rightElbow = null;
+    let leftWrist = null;
+    let rightWrist = null;
+
+    if (pose && pose.poseLandmarks) {
+      const pl = pose.poseLandmarks;
+      if (pl[11] && pl[11].visibility > 0.5) leftShoulder = { x: pl[11].x, y: pl[11].y };
+      if (pl[12] && pl[12].visibility > 0.5) rightShoulder = { x: pl[12].x, y: pl[12].y };
+      if (pl[13] && pl[13].visibility > 0.5) leftElbow = { x: pl[13].x, y: pl[13].y };
+      if (pl[14] && pl[14].visibility > 0.5) rightElbow = { x: pl[14].x, y: pl[14].y };
+      if (pl[15] && pl[15].visibility > 0.5) leftWrist = { x: pl[15].x, y: pl[15].y };
+      if (pl[16] && pl[16].visibility > 0.5) rightWrist = { x: pl[16].x, y: pl[16].y };
+    }
+
+    if (handState.Left.landmarks && handState.Left.landmarks[0]) {
+      leftWrist = { x: handState.Left.landmarks[0].x, y: handState.Left.landmarks[0].y };
+    }
+    if (handState.Right.landmarks && handState.Right.landmarks[0]) {
+      rightWrist = { x: handState.Right.landmarks[0].x, y: handState.Right.landmarks[0].y };
+    }
+
     return {
       x: point.x,
       y: point.y,
@@ -333,6 +360,13 @@ const BoardDrawingGame = () => {
       timestamp: nowSec(),
       zone,
       color,
+      leftShoulder,
+      rightShoulder,
+      leftElbow,
+      rightElbow,
+      leftWrist,
+      rightWrist,
+      palm: { x: point.x, y: point.y }
     };
   }, [getGameCanvasDimensions, nowSec]);
   const copyPoint = (point) => ({
@@ -343,6 +377,13 @@ const BoardDrawingGame = () => {
     timestamp: point.timestamp,
     zone: point.zone,
     color: point.color,
+    leftShoulder: point.leftShoulder ? { x: point.leftShoulder.x, y: point.leftShoulder.y } : null,
+    rightShoulder: point.rightShoulder ? { x: point.rightShoulder.x, y: point.rightShoulder.y } : null,
+    leftElbow: point.leftElbow ? { x: point.leftElbow.x, y: point.leftElbow.y } : null,
+    rightElbow: point.rightElbow ? { x: point.rightElbow.x, y: point.rightElbow.y } : null,
+    leftWrist: point.leftWrist ? { x: point.leftWrist.x, y: point.leftWrist.y } : null,
+    rightWrist: point.rightWrist ? { x: point.rightWrist.x, y: point.rightWrist.y } : null,
+    palm: point.palm ? { x: point.palm.x, y: point.palm.y } : null
   });
   const buildBoardDrawingAttempt = useCallback(({
     shape,
