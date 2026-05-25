@@ -31,11 +31,13 @@ import CreatePatientForm from "./components/admin/CreatePatientForm";
 import DoctorProfileForm from "./pages/doctor/DoctorProfileForm";
 import PatientSetting from "./pages/patient/PatientSetting";
 import GameAnalytics from "./pages/game/BoardDrawingGame/GameAnalytics";
+import AccessibilityWidget from "./components/common/AccessibilityWidget";
 
 function App() {
   return (
     <AuthProvider>
       <Router>
+        <AccessibilityWidget />
         <Routes>
           <Route path="/analytics" element={<GameAnalytics />} />
           <Route path="/login" element={<LoginPage />} />
