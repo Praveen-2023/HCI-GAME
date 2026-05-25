@@ -13,7 +13,9 @@ const normalizePoint = (point) => ({
   y: toNumber(point?.y, 0),
   screenX: toNumber(point?.screenX),
   screenY: toNumber(point?.screenY),
-  timestamp: toNumber(point?.timestamp, 0)
+  timestamp: toNumber(point?.timestamp, 0),
+  zone: point?.zone,
+  color: point?.color
 });
 
 const normalizePath = (path) => {
@@ -57,7 +59,11 @@ const normalizeAttempt = (attempt, index) => {
     total,
     completion,
     success: Boolean(attempt?.success),
-    scoreAfter: toNumber(attempt?.scoreAfter, 0)
+    scoreAfter: toNumber(attempt?.scoreAfter, 0),
+    traceQuality: toNumber(attempt?.traceQuality),
+    pointsEarned: toNumber(attempt?.pointsEarned),
+    safeZoneRadius: toNumber(attempt?.safeZoneRadius),
+    warningZoneRadius: toNumber(attempt?.warningZoneRadius)
   };
 };
 

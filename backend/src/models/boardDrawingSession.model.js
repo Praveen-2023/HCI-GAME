@@ -5,7 +5,9 @@ const coordinateSchema = new mongoose.Schema({
   y: Number,
   screenX: Number,
   screenY: Number,
-  timestamp: Number
+  timestamp: Number,
+  zone: String,
+  color: String
 }, { _id: false });
 
 const boardDrawingAttemptSchema = new mongoose.Schema({
@@ -24,7 +26,11 @@ const boardDrawingAttemptSchema = new mongoose.Schema({
   total: { type: Number },
   completion: { type: Number },
   success: { type: Boolean },
-  scoreAfter: { type: Number }
+  scoreAfter: { type: Number },
+  traceQuality: { type: Number },
+  pointsEarned: { type: Number },
+  safeZoneRadius: { type: Number },
+  warningZoneRadius: { type: Number }
 }, { _id: false });
 
 const playEntrySchema = new mongoose.Schema({

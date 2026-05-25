@@ -1883,18 +1883,14 @@ const DashboardContent = ({
   }, [today, dailyData]);
 
   // Coordinate data: lives at session.coordinates in the API response
-  const selectedCoordinates = (
-    recentSessions[selectedSession]?.session?.coordinates ||
-    recentSessions[selectedSession]?.coordinates ||
-    []
-  );
-  const selectedBoardDrawingAttempts = (
-    recentSessions[selectedSession]?.session?.boardDrawingAttempts ||
-    recentSessions[selectedSession]?.boardDrawingAttempts ||
+  const selectedCoordinates =
+    selectedSessionData?.session?.coordinates ||
+    selectedSessionData?.coordinates ||
+    [];
+  const selectedBoardDrawingAttempts =
     selectedSessionData?.session?.boardDrawingAttempts ||
     selectedSessionData?.boardDrawingAttempts ||
-    []
-  );
+    [];
 
   return (
     <div className="fade-in">
@@ -2052,7 +2048,7 @@ const DashboardContent = ({
                     </div>
                     <div>
                       <h3 className="text-sm font-bold text-gray-800 dark:text-white leading-none">Performance Breakdown</h3>
-                      <p className="text-[11px] text-gray-400">Correct / Incorrect / Skipped</p>
+                      <p className="text-[11px] text-gray-400">Completed / Partial / Skipped</p>
                     </div>
                   </div>
                   <div className="h-52">
@@ -2064,8 +2060,8 @@ const DashboardContent = ({
                           <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? "#9CA3AF" : "#94A3B8" }} />
                           <Tooltip contentStyle={{ borderRadius: "14px", border: "none", boxShadow: "0 8px 20px rgba(0,0,0,0.12)", backgroundColor: isDarkMode ? "#111827" : "#FFFFFF", color: isDarkMode ? "#F3F4F6" : "#111827" }} />
                           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                          <Line type="monotone" dataKey="correct" stroke="#10B981" strokeWidth={2.5} dot={{ r: 3, fill: "#10B981" }} name="Correct" />
-                          <Line type="monotone" dataKey="incorrect" stroke="#EF4444" strokeWidth={2.5} dot={{ r: 3, fill: "#EF4444" }} name="Incorrect" />
+                          <Line type="monotone" dataKey="correct" stroke="#10B981" strokeWidth={2.5} dot={{ r: 3, fill: "#10B981" }} name="Completed" />
+                          <Line type="monotone" dataKey="incorrect" stroke="#EF4444" strokeWidth={2.5} dot={{ r: 3, fill: "#EF4444" }} name="Partial" />
                           <Line type="monotone" dataKey="notDone" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3, fill: "#F59E0B" }} name="Skipped" />
                         </LineChart>
                       </ResponsiveContainer>
@@ -2092,8 +2088,8 @@ const DashboardContent = ({
                           <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: isDarkMode ? "#9CA3AF" : "#94A3B8" }} />
                           <Tooltip contentStyle={{ borderRadius: "14px", border: "none", boxShadow: "0 8px 20px rgba(0,0,0,0.12)", backgroundColor: isDarkMode ? "#111827" : "#FFFFFF", color: isDarkMode ? "#F3F4F6" : "#111827" }} />
                           <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-                          <Line type="monotone" dataKey="correct" stroke="#10B981" strokeWidth={2.5} dot={{ r: 3, fill: "#10B981" }} name="Correct" />
-                          <Line type="monotone" dataKey="incorrect" stroke="#EF4444" strokeWidth={2.5} dot={{ r: 3, fill: "#EF4444" }} name="Incorrect" />
+                          <Line type="monotone" dataKey="correct" stroke="#10B981" strokeWidth={2.5} dot={{ r: 3, fill: "#10B981" }} name="Completed" />
+                          <Line type="monotone" dataKey="incorrect" stroke="#EF4444" strokeWidth={2.5} dot={{ r: 3, fill: "#EF4444" }} name="Partial" />
                           <Line type="monotone" dataKey="notDone" stroke="#F59E0B" strokeWidth={2.5} dot={{ r: 3, fill: "#F59E0B" }} name="Skipped" />
                         </LineChart>
                       </ResponsiveContainer>
@@ -2128,15 +2124,23 @@ const DashboardContent = ({
                       {new Date(last7ChronDesc[selectedSession].time).toLocaleString()}
                     </div>
                     <div className="flex gap-2 ml-auto">
-                      <span className="px-2 py-0.5 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-[10px] font-black rounded-full">
-                        ✓ {last7ChronDesc[selectedSession].correct} correct
-                      </span>
-                      <span className="px-2 py-0.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-[10px] font-black rounded-full">
-                        ✗ {last7ChronDesc[selectedSession].incorrect} wrong
-                      </span>
-                      <span className="px-2 py-0.5 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 text-[10px] font-black rounded-full">
-                        ⭐ {last7ChronDesc[selectedSession].sessionScore || 0} pts
-                      </span>
+                      {(() => {
+                        const total = (last7ChronDesc[selectedSession].correct || 0) + (last7ChronDesc[selectedSession].incorrect || 0);
+                        const acc = total > 0 ? ((last7ChronDesc[selectedSession].correct / total) * 100).toFixed(0) : 0;
+                        return (
+                          <>
+                            <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-[10px] font-black rounded-full">
+                              🎯 {total} Total
+                            </span>
+                            <span className="px-2 py-0.5 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-[10px] font-black rounded-full">
+                              ✓ {acc}% Acc
+                            </span>
+                            <span className="px-2 py-0.5 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 text-[10px] font-black rounded-full">
+                              ⭐ {last7ChronDesc[selectedSession].sessionScore || 0} pts
+                            </span>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 )}

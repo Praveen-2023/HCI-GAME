@@ -17,10 +17,23 @@ const pathPoints = (path) =>
 const getShapeName = (attempt) =>
   attempt?.requestedShape || attempt?.shapeType || "shape";
 
+const SHAPE_COMPLEXITY_MULTIPLIERS = {
+  circle: 1.0,
+  ellipse: 1.2,
+  triangle: 1.2,
+  square: 1.2,
+  diamond: 1.3,
+  hexagon: 1.5,
+  heart: 2.0,
+  star: 2.5,
+};
+
 const AttemptReplayCard = ({ attempt, index }) => {
   const canvasWidth = attempt?.canvasWidth || 100;
   const canvasHeight = attempt?.canvasHeight || 100;
   const scale = (canvasWidth || 100) / 100;
+  const safeZoneRadius = attempt?.safeZoneRadius ?? 0.025;
+  const warningZoneRadius = attempt?.warningZoneRadius ?? 0.05;
 
   const targetPath = useMemo(() =>
     validPath(attempt?.targetPath).map((p) => getAbsoluteCoords(p, canvasWidth, canvasHeight)),
@@ -28,14 +41,74 @@ const AttemptReplayCard = ({ attempt, index }) => {
   );
   
   const drawnPath = useMemo(() =>
-    validPath(attempt?.drawnPath).map((p) => getAbsoluteCoords(p, canvasWidth, canvasHeight)),
-    [attempt?.drawnPath, canvasWidth, canvasHeight]
+    validPath(attempt?.drawnPath).map((p) => {
+      const abs = getAbsoluteCoords(p, canvasWidth, canvasHeight);
+      if (!abs.zone || !abs.color) {
+        if (targetPath.length < 2) {
+          abs.zone = 'safe';
+          abs.color = '#51cf66';
+        } else {
+          let minDistance = 999;
+          const nx = abs.absX / (canvasWidth || 100);
+          const ny = abs.absY / (canvasHeight || 100);
+          for (let i = 0; i < targetPath.length; i++) {
+            const t1 = targetPath[i];
+            const t2 = targetPath[(i + 1) % targetPath.length];
+            const n1x = t1.absX / (canvasWidth || 100);
+            const n1y = t1.absY / (canvasHeight || 100);
+            const n2x = t2.absX / (canvasWidth || 100);
+            const n2y = t2.absY / (canvasHeight || 100);
+            const l2 = Math.hypot(n1x - n2x, n1y - n2y) ** 2;
+            if (l2 === 0) {
+              minDistance = Math.min(minDistance, Math.hypot(nx - n1x, ny - n1y));
+              continue;
+            }
+            let t = ((nx - n1x) * (n2x - n1x) + (ny - n1y) * (n2y - n1y)) / l2;
+            t = Math.max(0, Math.min(1, t));
+            const px = n1x + t * (n2x - n1x);
+            const py = n1y + t * (n2y - n1y);
+            minDistance = Math.min(minDistance, Math.hypot(nx - px, ny - py));
+          }
+          if (minDistance >= warningZoneRadius) {
+            abs.zone = 'danger';
+            abs.color = '#ff6b6b';
+          } else if (minDistance >= safeZoneRadius) {
+            abs.zone = 'warning';
+            abs.color = '#fcc419';
+          } else {
+            abs.zone = 'safe';
+            abs.color = '#51cf66';
+          }
+        }
+      }
+      return abs;
+    }),
+    [attempt?.drawnPath, canvasWidth, canvasHeight, targetPath, safeZoneRadius, warningZoneRadius]
   );
 
   const [currentIdx, setCurrentIdx] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [showColorZones, setShowColorZones] = useState(false);
   const timerRef = useRef(null);
+
+  const calculatedQuality = useMemo(() => {
+    if (attempt?.traceQuality !== undefined) return attempt.traceQuality;
+    if (drawnPath.length === 0) return 100;
+    const safe = drawnPath.filter((p) => p.zone === "safe").length;
+    const warn = drawnPath.filter((p) => p.zone === "warning").length;
+    const danger = drawnPath.filter((p) => p.zone === "danger").length;
+    return Math.round(((safe * 1 + warn * 0.5 + danger * 0.1) / drawnPath.length) * 100);
+  }, [attempt?.traceQuality, drawnPath]);
+
+  const calculatedPoints = useMemo(() => {
+    if (attempt?.pointsEarned !== undefined) return attempt.pointsEarned;
+    const hits = attempt?.hits || 0;
+    const total = attempt?.total || 20;
+    const shapeName = getShapeName(attempt).toLowerCase();
+    const multiplier = SHAPE_COMPLEXITY_MULTIPLIERS[shapeName] || 1.0;
+    return Math.round(hits * (1 + hits / total) * multiplier * (calculatedQuality / 100));
+  }, [attempt?.pointsEarned, attempt?.hits, attempt?.total, attempt, calculatedQuality]);
 
   const safeIdx = drawnPath.length > 0 ? Math.min(currentIdx, drawnPath.length - 1) : 0;
   const currentPoint = drawnPath[safeIdx] || drawnPath[0];
@@ -114,6 +187,28 @@ const AttemptReplayCard = ({ attempt, index }) => {
               preserveAspectRatio="xMidYMid meet"
               style={{ aspectRatio: `${canvasWidth} / ${canvasHeight}` }}
             >
+              {showColorZones && targetPath.length > 1 && (
+                <>
+                  {/* Warning Zone Halo */}
+                  <polyline
+                    points={pathPoints(targetPath)}
+                    fill="none"
+                    stroke="rgba(252, 196, 25, 0.25)"
+                    strokeWidth={warningZoneRadius * 200 * scale}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  {/* Safe Zone Halo */}
+                  <polyline
+                    points={pathPoints(targetPath)}
+                    fill="none"
+                    stroke="rgba(81, 207, 102, 0.4)"
+                    strokeWidth={safeZoneRadius * 200 * scale}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </>
+              )}
               {targetPath.length > 1 && (
                 <polyline
                   points={pathPoints(targetPath)}
@@ -124,26 +219,65 @@ const AttemptReplayCard = ({ attempt, index }) => {
                   strokeLinejoin="round"
                 />
               )}
-              {drawnPath.length > 1 && (
-                <polyline
-                  points={pathPoints(drawnPath)}
-                  fill="none"
-                  stroke="#ff9500"
-                  strokeWidth={0.7 * scale}
-                  strokeOpacity="0.35"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
+              {showColorZones ? (
+                drawnPath.length > 1 &&
+                drawnPath.slice(1).map((p2, idx) => {
+                  const p1 = drawnPath[idx];
+                  return (
+                    <line
+                      key={idx}
+                      x1={p1.absX}
+                      y1={p1.absY}
+                      x2={p2.absX}
+                      y2={p2.absY}
+                      stroke={p2.color || "#ff9500"}
+                      strokeWidth={0.7 * scale}
+                      strokeOpacity="0.35"
+                      strokeLinecap="round"
+                    />
+                  );
+                })
+              ) : (
+                drawnPath.length > 1 && (
+                  <polyline
+                    points={pathPoints(drawnPath)}
+                    fill="none"
+                    stroke="#ff9500"
+                    strokeWidth={0.7 * scale}
+                    strokeOpacity="0.35"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )
               )}
-              {playedPath.length > 1 && (
-                <polyline
-                  points={pathPoints(playedPath)}
-                  fill="none"
-                  stroke="#ff9500"
-                  strokeWidth={2.4 * scale}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
+              {showColorZones ? (
+                playedPath.length > 1 &&
+                playedPath.slice(1).map((p2, idx) => {
+                  const p1 = playedPath[idx];
+                  return (
+                    <line
+                      key={idx}
+                      x1={p1.absX}
+                      y1={p1.absY}
+                      x2={p2.absX}
+                      y2={p2.absY}
+                      stroke={p2.color || "#ff9500"}
+                      strokeWidth={2.4 * scale}
+                      strokeLinecap="round"
+                    />
+                  );
+                })
+              ) : (
+                playedPath.length > 1 && (
+                  <polyline
+                    points={pathPoints(playedPath)}
+                    fill="none"
+                    stroke="#ff9500"
+                    strokeWidth={2.4 * scale}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )
               )}
               {drawnPath[0] && (
                 <circle cx={drawnPath[0].absX} cy={drawnPath[0].absY} r={1.5 * scale} fill="#2563EB" />
@@ -153,16 +287,25 @@ const AttemptReplayCard = ({ attempt, index }) => {
               )}
               {currentPoint && (
                 <>
-                  <circle cx={currentPoint.absX} cy={currentPoint.absY} r={3.4 * scale} fill="#ff9500" fillOpacity="0.25" />
-                  <circle cx={currentPoint.absX} cy={currentPoint.absY} r={1.5 * scale} fill="#ff9500" stroke="#2f2f35" strokeWidth={0.35 * scale} />
+                  <circle cx={currentPoint.absX} cy={currentPoint.absY} r={3.4 * scale} fill={showColorZones ? (currentPoint.color || "#ff9500") : "#ff9500"} fillOpacity="0.25" />
+                  <circle cx={currentPoint.absX} cy={currentPoint.absY} r={1.5 * scale} fill={showColorZones ? (currentPoint.color || "#ff9500") : "#ff9500"} stroke="#2f2f35" strokeWidth={0.35 * scale} />
                 </>
               )}
             </svg>
 
-            <div className="absolute left-3 top-3 flex gap-2 rounded-lg bg-white/80 px-2 py-1 text-[10px] font-black text-gray-700 shadow-sm border border-white/60">
-              <span className="flex items-center gap-1"><span className="h-0.5 w-4 bg-[#2f2f35]" /> Target</span>
-              <span className="flex items-center gap-1"><span className="h-0.5 w-4 bg-[#ff9500]" /> User</span>
-            </div>
+            {showColorZones ? (
+              <div className="absolute left-3 top-3 flex flex-wrap gap-2 rounded-lg bg-white/80 px-2 py-1 text-[10px] font-black text-gray-700 shadow-sm border border-white/60">
+                <span className="flex items-center gap-1"><span className="h-0.5 w-4 bg-[#2f2f35]" /> Target</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#51cf66]" /> Safe</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#fcc419]" /> Warning</span>
+                <span className="flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-[#ff6b6b]" /> Danger</span>
+              </div>
+            ) : (
+              <div className="absolute left-3 top-3 flex gap-2 rounded-lg bg-white/80 px-2 py-1 text-[10px] font-black text-gray-700 shadow-sm border border-white/60">
+                <span className="flex items-center gap-1"><span className="h-0.5 w-4 bg-[#2f2f35]" /> Target</span>
+                <span className="flex items-center gap-1"><span className="h-0.5 w-4 bg-[#ff9500]" /> User</span>
+              </div>
+            )}
             <div className="absolute bottom-3 right-3 rounded-lg bg-white/90 px-2 py-1 text-[10px] font-mono text-gray-600 shadow-sm border border-gray-200">
               {safeIdx + 1}/{drawnPath.length}
             </div>
@@ -173,7 +316,7 @@ const AttemptReplayCard = ({ attempt, index }) => {
               type="button"
               onClick={() => setIsPlaying(!isPlaying)}
               className={`px-3 py-2 rounded-xl text-xs font-black text-white transition-all active:scale-95 ${
-                isPlaying ? "bg-amber-600" : "bg-gray-900 dark:bg-primary-600"
+                isPlaying ? "bg-amber-600" : "bg-gray-950 dark:bg-primary-600"
               }`}
             >
               {isPlaying ? "Pause" : "Play"}
@@ -184,6 +327,15 @@ const AttemptReplayCard = ({ attempt, index }) => {
               className="px-3 py-2 rounded-xl text-xs font-black bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700"
             >
               Reset
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowColorZones(!showColorZones)}
+              className={`px-3 py-2 rounded-xl text-xs font-black transition-all active:scale-95 ${
+                showColorZones ? "bg-green-600 text-white" : "bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700"
+              }`}
+            >
+              🌈 Color Trajectory: {showColorZones ? "ON" : "OFF"}
             </button>
             <input
               type="range"
@@ -217,8 +369,20 @@ const AttemptReplayCard = ({ attempt, index }) => {
               <span className="font-bold text-gray-800 dark:text-white capitalize">{getShapeName(attempt)}</span>
             </div>
             <div className="flex justify-between gap-3 border-b dark:border-gray-700 pb-2">
+              <span className="text-gray-500 dark:text-gray-400">Score</span>
+              <span className="font-bold text-emerald-600 dark:text-emerald-400">+{calculatedPoints} pts</span>
+            </div>
+            <div className="flex justify-between gap-3 border-b dark:border-gray-700 pb-2">
+              <span className="text-gray-500 dark:text-gray-400">Trace Quality</span>
+              <span className="font-bold text-blue-600 dark:text-blue-400">{calculatedQuality}%</span>
+            </div>
+            <div className="flex justify-between gap-3 border-b dark:border-gray-700 pb-2">
               <span className="text-gray-500 dark:text-gray-400">Hits</span>
               <span className="font-bold text-gray-800 dark:text-white">{attempt?.hits || 0}/{attempt?.total || 0}</span>
+            </div>
+            <div className="flex justify-between gap-3 border-b dark:border-gray-700 pb-2">
+              <span className="text-gray-500 dark:text-gray-400">Point Frame Time</span>
+              <span className="font-bold font-mono text-gray-800 dark:text-white">{currentPoint?.timestamp !== undefined ? `${currentPoint.timestamp}s` : "—"}</span>
             </div>
             <div className="flex justify-between gap-3 border-b dark:border-gray-700 pb-2">
               <span className="text-gray-500 dark:text-gray-400">Distance</span>
@@ -233,6 +397,19 @@ const AttemptReplayCard = ({ attempt, index }) => {
               <span className="font-bold font-mono text-gray-800 dark:text-white">
                 {(currentPoint?.x ?? 0).toFixed(3)}, {(currentPoint?.y ?? 0).toFixed(3)}
               </span>
+            </div>
+            <div className="border-t dark:border-gray-700 my-2 pt-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">🔧 Tracing Zone Adjustments</p>
+              <div className="space-y-1.5">
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">🟢 Safe Zone</span>
+                  <span className="font-bold text-gray-800 dark:text-white">{(safeZoneRadius * 100).toFixed(1)}%</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">🟡 Warning</span>
+                  <span className="font-bold text-gray-800 dark:text-white">{(warningZoneRadius * 100).toFixed(1)}%</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>

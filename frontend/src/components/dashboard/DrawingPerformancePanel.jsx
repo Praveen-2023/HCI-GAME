@@ -95,7 +95,7 @@ const DrawingPerformancePanel = ({ userId }) => {
         </div>
       </div>
 
-      <div className="mt-8 border-t border-slate-200 dark:border-slate-700 pt-6">
+      {/* <div className="mt-8 border-t border-slate-200 dark:border-slate-700 pt-6">
         <h4 className="text-sm font-semibold text-slate-800 dark:text-white mb-4">Recent Sessions</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {games.slice(0, 4).map(g => (
@@ -119,7 +119,7 @@ const DrawingPerformancePanel = ({ userId }) => {
             </div>
           ))}
         </div>
-      </div>
+      </div> */}
     </div>
   );
 };

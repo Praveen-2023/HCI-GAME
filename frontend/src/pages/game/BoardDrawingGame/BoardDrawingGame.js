@@ -33,6 +33,18 @@ const SHAPES = [
   "diamond",
 ];
 
+const SHAPE_COMPLEXITY_MULTIPLIERS = {
+  circle: 1.0,
+  ellipse: 1.2,
+  triangle: 1.2,
+  square: 1.2,
+  diamond: 1.3,
+  hexagon: 1.5,
+  heart: 2.0,
+  star: 2.5,
+};
+
+
 const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
 
 const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
@@ -137,6 +149,33 @@ const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
   return points;
 };
 
+const distNorm = (a, b) => {
+  if (!a || !b) return 999;
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
+
+const getMinDistanceToShapeOutline = (pos, points) => {
+  if (!points || points.length < 2) return 999;
+  let minDistance = 999;
+  for (let i = 0; i < points.length; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    const l2 = distNorm(p1, p2) ** 2;
+    if (l2 === 0) {
+      minDistance = Math.min(minDistance, distNorm(pos, p1));
+      continue;
+    }
+    let t = ((pos.x - p1.x) * (p2.x - p1.x) + (pos.y - p1.y) * (p2.y - p1.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const projection = {
+      x: p1.x + t * (p2.x - p1.x),
+      y: p1.y + t * (p2.y - p1.y),
+    };
+    minDistance = Math.min(minDistance, distNorm(pos, projection));
+  }
+  return minDistance;
+};
+
 // ==================== MAIN COMPONENT ====================
 const BoardDrawingGame = () => {
   const { isDarkMode } = useAuth();
@@ -158,6 +197,19 @@ const BoardDrawingGame = () => {
   const [reps, setReps] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(300);
   const [successRate, setSuccessRate] = useState(0);
+
+  const [handPoseMode, setHandPoseModeState] = useState("strict");
+  const handPoseModeRef = useRef("strict");
+  const toggleHandPoseMode = () => {
+    const newMode = handPoseMode === "strict" ? "any" : "strict";
+    setHandPoseModeState(newMode);
+    handPoseModeRef.current = newMode;
+  };
+
+  const [safeZoneRadius, setSafeZoneRadius] = useState(0.025);
+  const safeZoneRadiusRef = useRef(0.025);
+  const [warningZoneRadius, setWarningZoneRadius] = useState(0.05);
+  const warningZoneRadiusRef = useRef(0.05);
 
   // Hand State
   const [leftHandVisible, setLeftHandVisible] = useState(false);
@@ -239,13 +291,10 @@ const BoardDrawingGame = () => {
   const shapeRef = useRef(null);
   const currentTargetIdxRef = useRef(0);
   const drawnPathRef = useRef([]);
+  const gestureResetRequiredRef = useRef(false);
   const lastPoseResultsRef = useRef(null);
 
   // ==================== UTILITY FUNCTIONS ====================
-  const distNorm = (a, b) => {
-    if (!a || !b) return 999;
-    return Math.hypot(a.x - b.x, a.y - b.y);
-  };
   const smoothPos = (prev, next) => {
     if (!prev) return { x: next.x, y: next.y };
     return {
@@ -274,7 +323,7 @@ const BoardDrawingGame = () => {
       height: canvas?.height || canvas?.clientHeight || 0,
     };
   }, []);
-  const makeTracePoint = useCallback((point) => {
+  const makeTracePoint = useCallback((point, zone = "safe", color = "#51cf66") => {
     const canvas = getGameCanvasDimensions();
     return {
       x: point.x,
@@ -282,6 +331,8 @@ const BoardDrawingGame = () => {
       screenX: canvas.width ? point.x * canvas.width : undefined,
       screenY: canvas.height ? point.y * canvas.height : undefined,
       timestamp: nowSec(),
+      zone,
+      color,
     };
   }, [getGameCanvasDimensions, nowSec]);
   const copyPoint = (point) => ({
@@ -290,6 +341,8 @@ const BoardDrawingGame = () => {
     screenX: point.screenX,
     screenY: point.screenY,
     timestamp: point.timestamp,
+    zone: point.zone,
+    color: point.color,
   });
   const buildBoardDrawingAttempt = useCallback(({
     shape,
@@ -299,6 +352,10 @@ const BoardDrawingGame = () => {
     completion,
     success,
     scoreAfter,
+    traceQuality,
+    pointsEarned,
+    safeZoneRadius,
+    warningZoneRadius,
   }) => {
     const canvas = getGameCanvasDimensions();
     const closePath = (points) => {
@@ -334,6 +391,10 @@ const BoardDrawingGame = () => {
       completion,
       success,
       scoreAfter,
+      traceQuality,
+      pointsEarned,
+      safeZoneRadius,
+      warningZoneRadius,
     };
   }, [getGameCanvasDimensions, nowSec]);
   const safeCloseModule = useCallback((moduleRef, moduleName) => {
@@ -432,12 +493,8 @@ const BoardDrawingGame = () => {
   const pickNewShape = useCallback(() => {
     // Determine shape by level
     const level = calibrationRef.current.level || 1;
-    let shapeType;
-    if (level <= SHAPES.length) {
-      shapeType = SHAPES[level - 1];
-    } else {
-      shapeType = SHAPES[Math.floor(Math.random() * SHAPES.length)];
-    }
+    // Just pick a random shape every time to show variety
+    const shapeType = SHAPES[Math.floor(Math.random() * SHAPES.length)];
 
     const points = generateShapePoints(shapeType);
     shapeRef.current = {
@@ -705,7 +762,19 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       const isDrawing = shape.drawingHand === label;
       if (!hand.smoothPos || (!hand.visible && !isDrawing)) return;
       const pos = hand.smoothPos;
-      const isClosed = hand.visible && hand.closed;
+      const isDrawingTriggered = handPoseModeRef.current === "any" 
+        ? hand.visible 
+        : (hand.visible && hand.closed);
+
+      if (!isDrawingTriggered) {
+        gestureResetRequiredRef.current = false;
+      }
+      if (gestureResetRequiredRef.current) {
+        if (distNorm(pos, shape.points[0]) >= CONFIG.TRACE_TOLERANCE) {
+          gestureResetRequiredRef.current = false;
+        }
+      }
+      if (gestureResetRequiredRef.current) return;
       
       // Track downsampled coordinates for relative hand trajectory visualization
       if (sessionStartRef.current && Date.now() - lastCoordTimeRef.current > COORD_SAMPLE_INTERVAL_MS) {
@@ -721,31 +790,43 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
       if (
         !shape.drawingHand &&
-        isClosed &&
+        isDrawingTriggered &&
         drawnPathRef.current.length === 0
       ) {
-        shape.drawingHand = label;
-        activeAttemptStartedAtRef.current = nowSec();
-        const startPoint = makeTracePoint(pos);
-        drawnPathRef.current = [startPoint];
+        // Only start drawing if the hand is near the FIRST point
         if (distNorm(pos, shape.points[0]) < CONFIG.TRACE_TOLERANCE) {
+          shape.drawingHand = label;
+          activeAttemptStartedAtRef.current = nowSec();
+          const startPoint = makeTracePoint(pos, "safe", "#51cf66");
+          drawnPathRef.current = [startPoint];
           currentTargetIdxRef.current = 1;
-        } else {
-          currentTargetIdxRef.current = 0;
+          
+          logsRef.current.push({
+            timestamp: nowSec(),
+            event: "start_drawing",
+            shape_type: shape.type,
+            hand: label,
+          });
+          showStatus(
+            `✏️ ${label} hand started drawing! Follow the points in order.`,
+            1500,
+          );
         }
-        logsRef.current.push({
-          timestamp: nowSec(),
-          event: "start_drawing",
-          shape_type: shape.type,
-          hand: label,
-        });
-        showStatus(
-          `✏️ ${label} hand started drawing! Follow the points in order.`,
-          1500,
-        );
       } else if (isDrawing) {
-        if (isClosed) {
-          const tracedPoint = makeTracePoint(pos);
+        const autoComplete = (handPoseModeRef.current === "any" && currentTargetIdxRef.current >= shape.points.length);
+        
+        if (isDrawingTriggered && !autoComplete) {
+          const distToOutline = getMinDistanceToShapeOutline(pos, shape.points);
+          let zone = "safe";
+          let color = "#51cf66";
+          if (distToOutline >= warningZoneRadiusRef.current) {
+            zone = "danger";
+            color = "#ff6b6b";
+          } else if (distToOutline >= safeZoneRadiusRef.current) {
+            zone = "warning";
+            color = "#fcc419";
+          }
+          const tracedPoint = makeTracePoint(pos, zone, color);
           drawnPathRef.current.push(tracedPoint);
           // Advance targets if close
           while (
@@ -756,17 +837,40 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             currentTargetIdxRef.current++;
           }
           if (currentTargetIdxRef.current >= shape.points.length) {
-            showStatus(
-              "All points reached! Open hand to complete the shape.",
-              1000,
-            );
+            if (handPoseModeRef.current === "any") {
+              // Will be auto-completed immediately below
+            } else {
+              showStatus(
+                "All points reached! Open hand to complete the shape.",
+                1000,
+              );
+            }
           }
-        } else {
-          // Open hand - end drawing
+        }
+        
+        const shouldEndDrawing = !isDrawingTriggered || autoComplete;
+
+        if (shouldEndDrawing) {
+          // Open hand - end drawing (or auto-completed)
           shape.drawingHand = null;
           const hits = currentTargetIdxRef.current;
           const total = shape.points.length;
           const completion = hits / total;
+
+          const path = drawnPathRef.current;
+          const safeCount = path.filter(p => p.zone === 'safe').length;
+          const warningCount = path.filter(p => p.zone === 'warning').length;
+          const dangerCount = path.filter(p => p.zone === 'danger').length;
+          const totalPoints = path.length;
+          const traceQuality = totalPoints > 0 ? Math.round(((safeCount * 1.0 + warningCount * 0.5 + dangerCount * 0.1) / totalPoints) * 100) : 100;
+
+          // Partial Scoring Algorithm with Complexity Multiplier and Quality Degrader
+          const multiplier = SHAPE_COMPLEXITY_MULTIPLIERS[shape.type] || 1;
+          const pointsEarned = Math.round(hits * (1 + (hits / total)) * multiplier * (traceQuality / 100));
+          const newScore = scoreRef.current + pointsEarned;
+          setScore(newScore);
+          scoreRef.current = newScore;
+
           logsRef.current.push({
             timestamp: nowSec(),
             event: "end_drawing",
@@ -780,9 +884,6 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             // Shape Success!
             const newReps = reps + 1;
             setReps(newReps);
-            const newScore = scoreRef.current + CONFIG.SCORE_PER_SHAPE;
-            setScore(newScore);
-            scoreRef.current = newScore;
             successesRef.current++;
 
             // Advance level every 3 shapes
@@ -800,6 +901,10 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
                 completion,
                 success: true,
                 scoreAfter: newScore,
+                traceQuality,
+                pointsEarned,
+                safeZoneRadius: safeZoneRadiusRef.current,
+                warningZoneRadius: warningZoneRadiusRef.current,
               }),
             );
             persistBoardDrawingBuffer();
@@ -819,10 +924,12 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
               100
             ).toFixed(0);
             setSuccessRate(newRate);
+            const multText = multiplier > 1 ? ` (${multiplier}x complexity)` : "";
             showStatus(
-              `✅ Shape completed! ${Math.round(completion * 100)}% accuracy +${CONFIG.SCORE_PER_SHAPE} points`,
+              `✅ Shape completed! ${Math.round(completion * 100)}% accuracy (Quality: ${traceQuality}%) +${pointsEarned} points${multText}`,
               2000,
             );
+            gestureResetRequiredRef.current = true;
             spawnShape();
           } else {
             boardDrawingAttemptsRef.current.push(
@@ -833,7 +940,11 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
                 total,
                 completion,
                 success: false,
-                scoreAfter: scoreRef.current,
+                scoreAfter: newScore,
+                traceQuality,
+                pointsEarned,
+                safeZoneRadius: safeZoneRadiusRef.current,
+                warningZoneRadius: warningZoneRadiusRef.current,
               }),
             );
             persistBoardDrawingBuffer();
@@ -853,8 +964,9 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
               100
             ).toFixed(0);
             setSuccessRate(newRate);
+            const retryAction = handPoseModeRef.current === "any" ? "Hover starting point to retry." : "Close hand to retry.";
             showStatus(
-              `⚠️ Incomplete trace: ${Math.round(completion * 100)}% - Close hand near start to retry.`,
+              `⚠️ Partial trace: ${Math.round(completion * 100)}% (Quality: ${traceQuality}%) (+${pointsEarned} pts) - ${retryAction}`,
               2000,
             );
             currentTargetIdxRef.current = 0;
@@ -896,9 +1008,10 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       const hand = handState[label];
       if (!hand.landmarks || !hand.visible) return;
       const lm = hand.landmarks;
-      const color = hand.closed
-        ? "rgba(220, 50, 50, 0.9)"
-        : "rgba(50, 200, 80, 0.9)";
+      const canDraw = handPoseModeRef.current === "any" ? true : hand.closed;
+      const color = canDraw
+        ? "rgba(50, 200, 80, 0.9)" // green for can draw
+        : "rgba(220, 50, 50, 0.9)"; // red for cannot draw
 
       const palmCenter = {
         x: (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5,
@@ -967,7 +1080,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       const pcy = palmCenter.y * h;
       ctx.beginPath();
       ctx.arc(pcx, pcy, 16, 0, Math.PI * 2);
-      ctx.strokeStyle = hand.closed ? "#ff6b6b" : "#51cf66";
+      ctx.strokeStyle = color;
       ctx.lineWidth = 3;
       ctx.stroke();
 
@@ -980,13 +1093,13 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
       ctx.beginPath();
       ctx.arc(pcx, pcy, 4, 0, Math.PI * 2);
-      ctx.fillStyle = hand.closed ? "#ff6b6b" : "#51cf66";
+      ctx.fillStyle = color;
       ctx.fill();
-      const stateText = hand.closed ? "CLOSED" : "OPEN";
+      const stateText = canDraw ? "CAN DRAW" : "CANNOT DRAW";
       ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
-      ctx.fillRect(pcx + 20, pcy - 16, 120, 26);
+      ctx.fillRect(pcx + 20, pcy - 16, 140, 26);
 
-      ctx.fillStyle = hand.closed ? "#ff6b6b" : "#51cf66";
+      ctx.fillStyle = color;
       ctx.font = "bold 14px Arial";
       ctx.fillText(`${label} ${stateText}`, pcx + 26, pcy);
     });
@@ -1003,6 +1116,29 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     const scale = window.devicePixelRatio || 1;
     if (shapeRef.current) {
       const shape = shapeRef.current;
+      
+      // Draw warning zone buffer halo
+      ctx.strokeStyle = isDarkMode ? "rgba(252, 196, 25, 0.15)" : "rgba(252, 196, 25, 0.2)";
+      ctx.lineWidth = warningZoneRadiusRef.current * 2 * w; // dynamic double warning radius
+      ctx.beginPath();
+      ctx.moveTo(shape.points[0].x * w, shape.points[0].y * h);
+      for (let i = 1; i < shape.points.length; i++) {
+        ctx.lineTo(shape.points[i].x * w, shape.points[i].y * h);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      // Draw safe zone buffer halo
+      ctx.strokeStyle = isDarkMode ? "rgba(81, 207, 102, 0.2)" : "rgba(81, 207, 102, 0.35)";
+      ctx.lineWidth = safeZoneRadiusRef.current * 2 * w; // dynamic double safe radius
+      ctx.beginPath();
+      ctx.moveTo(shape.points[0].x * w, shape.points[0].y * h);
+      for (let i = 1; i < shape.points.length; i++) {
+        ctx.lineTo(shape.points[i].x * w, shape.points[i].y * h);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
       // Draw shape outline
       ctx.strokeStyle = "#333";
       ctx.lineWidth = 3 * scale;
@@ -1035,20 +1171,22 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
       // Draw drawn path
       if (drawnPathRef.current.length > 1) {
-        ctx.strokeStyle = shape.drawingHand ? "#ff9500" : "#6c757d"; // orange if active, gray if not
         ctx.lineWidth = 4 * scale;
-        ctx.beginPath();
-        ctx.moveTo(
-          drawnPathRef.current[0].x * w,
-          drawnPathRef.current[0].y * h,
-        );
         for (let i = 1; i < drawnPathRef.current.length; i++) {
-          ctx.lineTo(
-            drawnPathRef.current[i].x * w,
-            drawnPathRef.current[i].y * h,
+          const p1 = drawnPathRef.current[i - 1];
+          const p2 = drawnPathRef.current[i];
+          ctx.strokeStyle = p2.color || "#ff9500";
+          ctx.beginPath();
+          ctx.moveTo(
+            p1.x * w,
+            p1.y * h,
           );
+          ctx.lineTo(
+            p2.x * w,
+            p2.y * h,
+          );
+          ctx.stroke();
         }
-        ctx.stroke();
       }
     }
     const handState = handStateRef.current;
@@ -1058,15 +1196,16 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       const px = hand.smoothPos.x * w;
       const py = hand.smoothPos.y * h;
 
+      const canDraw = handPoseModeRef.current === "any" ? true : hand.closed;
       ctx.beginPath();
       ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
       ctx.arc(px + 2, py + 2, 14 * scale, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.beginPath();
-      ctx.fillStyle = hand.closed
-        ? "rgba(220, 50, 50, 0.95)"
-        : "rgba(50, 200, 80, 0.95)";
+      ctx.fillStyle = canDraw
+        ? "rgba(50, 200, 80, 0.95)" // green for can draw
+        : "rgba(220, 50, 50, 0.95)"; // red for cannot draw
       ctx.arc(px, py, 14 * scale, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = "#fff";
@@ -1553,28 +1692,36 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           )}
 
           <div style={styles.handStatus}>
-            {leftHandVisible && (
-              <div
-                style={{
-                  ...styles.handIndicator,
-                  ...(leftHandClosed ? styles.handClosed : styles.handOpen),
-                }}
-              >
-                <span style={styles.dot}></span>
-                <span>Left {leftHandClosed ? "🔴" : "🟢"}</span>
-              </div>
-            )}
-            {rightHandVisible && (
-              <div
-                style={{
-                  ...styles.handIndicator,
-                  ...(rightHandClosed ? styles.handClosed : styles.handOpen),
-                }}
-              >
-                <span style={styles.dot}></span>
-                <span>Right {rightHandClosed ? "🔴" : "🟢"}</span>
-              </div>
-            )}
+            {(() => {
+              const leftCanDraw = handPoseMode === "any" ? leftHandVisible : (leftHandVisible && leftHandClosed);
+              const rightCanDraw = handPoseMode === "any" ? rightHandVisible : (rightHandVisible && rightHandClosed);
+              return (
+                <>
+                  {leftHandVisible && (
+                    <div
+                      style={{
+                        ...styles.handIndicator,
+                        ...(leftCanDraw ? styles.handOpen : styles.handClosed),
+                      }}
+                    >
+                      <span style={styles.dot}></span>
+                      <span>Left {leftCanDraw ? "🟢 Can Draw" : "🔴 Cannot Draw"}</span>
+                    </div>
+                  )}
+                  {rightHandVisible && (
+                    <div
+                      style={{
+                        ...styles.handIndicator,
+                        ...(rightCanDraw ? styles.handOpen : styles.handClosed),
+                      }}
+                    >
+                      <span style={styles.dot}></span>
+                      <span>Right {rightCanDraw ? "🟢 Can Draw" : "🔴 Cannot Draw"}</span>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
 
@@ -1589,6 +1736,62 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           <button onClick={handleStartSession} style={styles.controlButton}>
             {isSessionActive ? "⏸ Pause" : "▶️ Start Therapy"}
           </button>
+          <button 
+            onClick={toggleHandPoseMode} 
+            style={{...styles.controlButton, background: handPoseMode === "strict" ? "#ff922b" : "#51cf66", marginTop: '10px'}}
+          >
+            {handPoseMode === "strict" ? "✊ Posture: Strict (Pinch to Draw)" : "✋ Posture: Any (Always Draw)"}
+          </button>
+          
+          <div style={{ marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '10px', background: isDarkMode ? '#1e293b' : '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px solid ' + (isDarkMode ? '#334155' : '#e2e8f0'), width: '100%' }}>
+            <div style={{ fontSize: '10px', fontWeight: 'bold', color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>
+              🔧 Tracing Zone Adjustments
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: isDarkMode ? '#cbd5e1' : '#334155', minWidth: '110px', textAlign: 'left' }}>
+                🟢 Safe Zone: {(safeZoneRadius * 100).toFixed(1)}%
+              </span>
+              <input
+                type="range"
+                min="0.01"
+                max="0.06"
+                step="0.005"
+                value={safeZoneRadius}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  setSafeZoneRadius(val);
+                  safeZoneRadiusRef.current = val;
+                  if (val > warningZoneRadius) {
+                    setWarningZoneRadius(val + 0.01);
+                    warningZoneRadiusRef.current = val + 0.01;
+                  }
+                }}
+                style={{ flex: 1, accentColor: '#51cf66', cursor: 'pointer' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: isDarkMode ? '#cbd5e1' : '#334155', minWidth: '110px', textAlign: 'left' }}>
+                🟡 Warning: {(warningZoneRadius * 100).toFixed(1)}%
+              </span>
+              <input
+                type="range"
+                min="0.02"
+                max="0.12"
+                step="0.005"
+                value={warningZoneRadius}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (val >= safeZoneRadius) {
+                    setWarningZoneRadius(val);
+                    warningZoneRadiusRef.current = val;
+                  }
+                }}
+                style={{ flex: 1, accentColor: '#fcc419', cursor: 'pointer' }}
+              />
+            </div>
+          </div>
         </div>
 
         <div style={themeStyles.stats}>
