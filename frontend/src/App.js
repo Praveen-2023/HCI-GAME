@@ -25,16 +25,21 @@ import PianoReactionGame from "./pages/game/PianoReactionGame/PianoReactionGame"
 import ShapeTracingGame from "./pages/game/ShapeTracingGame/ShapeTracingGame";
 import BoardDrawingGame from "./pages/game/BoardDrawingGame/BoardDrawingGame";
 import FruitBasketGame from "./pages/game/FruitBasketGame/FruitBasketGame";
+import InCamGame from "./pages/game/InCamGame/InCamGame";
 import ProtectedRoute from "./components/common/ProtectedRoute";
 import CreatePatientForm from "./components/admin/CreatePatientForm";
 import DoctorProfileForm from "./pages/doctor/DoctorProfileForm";
 import PatientSetting from "./pages/patient/PatientSetting";
+import GameAnalytics from "./pages/game/BoardDrawingGame/GameAnalytics";
+import AccessibilityWidget from "./components/common/AccessibilityWidget";
 
 function App() {
   return (
     <AuthProvider>
       <Router>
+        <AccessibilityWidget />
         <Routes>
+          <Route path="/analytics" element={<GameAnalytics />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -150,6 +155,14 @@ function App() {
             element={
               <ProtectedRoute allowedTypes={["patient", "caretaker"]}>
                 <FruitBasketGame />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/in-cam-game"
+            element={
+              <ProtectedRoute allowedTypes={["patient", "caretaker"]}>
+                <InCamGame />
               </ProtectedRoute>
             }
           />

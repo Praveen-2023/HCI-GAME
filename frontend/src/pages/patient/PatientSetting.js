@@ -106,8 +106,8 @@ function PatientSetting() {
     <div className="max-w-4xl mx-auto pb-12">
       <div className="flex items-center gap-4 mb-8">
         <button
-          onClick={() => navigate(-1)}
-          className="p-2 hover:bg-white rounded-xl transition-colors text-gray-400 hover:text-primary-500"
+          onClick={() => navigate("/patient/dashboard")}
+          className="mr-4 p-2 rounded-full bg-white dark:bg-gray-800 shadow-sm border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition"
         >
           <ArrowLeft size={24} />
         </button>

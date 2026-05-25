@@ -4,12 +4,12 @@ import { useAuth } from "../../../context/AuthContext";
 import { gameService } from "../../../services/gameService";
 import gameSessionBuffer from "../../../services/gameSessionBuffer";
 import SaveExitButton from "../SaveExitButton";
+import { COORD_SAMPLE_INTERVAL_MS } from "../../../constants";
 import {
   Play,
   Pause,
   RotateCcw,
   Home,
-  Settings,
   ArrowRight,
 } from "lucide-react";
 import GameImage1 from "./1.png";
@@ -99,8 +99,6 @@ const OnboardingScreen = ({ onNext, currentLevelSpan, isDarkMode }) => {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Remove the broken useDarkMode hook call
 
   return (
     <div
@@ -234,6 +232,7 @@ const PlayingGame = ({
   onResume,
   onEnd,
   onReset,
+  onBeforeSave,
   currentSection,
   feedbackSection,
   feedbackType,
@@ -249,7 +248,16 @@ const PlayingGame = ({
   handleKeyPress,
   isMobile,
   isDarkMode,
+  platform,
+  exerciseType,
+  keyboardLayout,
+  mobileKeysCount,
+  fingerTimeouts,
+  disabledKeys,
 }) => {
+  const containerRef = useRef(null);
+  const lastSampleTimeRef = useRef(0);
+
   useEffect(() => {
     document.body.style.overflow = "hidden";
     return () => {
@@ -260,7 +268,93 @@ const PlayingGame = ({
   const PRIMARY_BLUE = "#3B82F6";
   const LIGHT_BLUE = "#93C5FD";
 
-  // Remove the broken useDarkMode hook call
+  const getFingerLabel = (index, totalKeys) => {
+    if (platform === 'mobile') {
+      if (totalKeys === 4) {
+        const labels = ["🤙 Pinky", "💍 Ring", "🖐️ Middle", "✍️ Index"];
+        return labels[index] || "";
+      } else if (totalKeys === 5) {
+        const labels = ["👍 Thumb", "✍️ Index", "🖐️ Middle", "💍 Ring", "🤙 Pinky"];
+        return labels[index] || "";
+      }
+    } else if (platform === 'laptop' && exerciseType === 'piano_finger') {
+      if (keyboardLayout === 'both') {
+        const labels = [
+          "🤙 L Pinky", "💍 L Ring", "🖐️ L Middle", "✍️ L Index",
+          "✍️ R Index", "🖐️ R Middle", "💍 R Ring", "🤙 R Pinky"
+        ];
+        return labels[index] || "";
+      } else if (keyboardLayout === 'left') {
+        const labels = ["🤙 Pinky", "💍 Ring", "🖐️ Middle", "✍️ Index"];
+        return labels[index] || "";
+      } else {
+        const labels = ["✍️ Index", "🖐️ Middle", "💍 Ring", "🤙 Pinky"];
+        return labels[index] || "";
+      }
+    }
+    return "";
+  };
+
+  const getFingerForKey = (key) => {
+    const k = key.toUpperCase();
+    if (platform === 'laptop') {
+      if (exerciseType === 'piano_finger') {
+        if (keyboardLayout === 'both') {
+          if (k === 'A') return 'leftPinky';
+          if (k === 'S') return 'leftRing';
+          if (k === 'D') return 'leftMiddle';
+          if (k === 'F') return 'leftIndex';
+          if (k === 'H') return 'rightIndex';
+          if (k === 'J') return 'rightMiddle';
+          if (k === 'K') return 'rightRing';
+          if (k === 'L') return 'rightPinky';
+        } else if (keyboardLayout === 'left') {
+          if (k === 'A') return 'leftPinky';
+          if (k === 'S') return 'leftRing';
+          if (k === 'D') return 'leftMiddle';
+          if (k === 'F') return 'leftIndex';
+        } else {
+          if (k === 'H') return 'rightIndex';
+          if (k === 'J') return 'rightMiddle';
+          if (k === 'K') return 'rightRing';
+          if (k === 'L') return 'rightPinky';
+        }
+      }
+    } else {
+      if (mobileKeysCount === 4) {
+        const fingers = ['pinky', 'ring', 'middle', 'index'];
+        const idx = activeKeys.indexOf(k);
+        return fingers[idx] || null;
+      } else if (mobileKeysCount === 5) {
+        const fingers = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+        const idx = activeKeys.indexOf(k);
+        return fingers[idx] || null;
+      }
+    }
+    return null;
+  };
+
+  const handlePointerMove = (e) => {
+    if (isPaused || !containerRef.current || exerciseType !== 'piano_ankle') return;
+
+    const now = Date.now();
+    if (now - lastSampleTimeRef.current >= COORD_SAMPLE_INTERVAL_MS) {
+      lastSampleTimeRef.current = now;
+
+      const rect = containerRef.current.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const y = (e.clientY - rect.top) / rect.height;
+
+      const normalizedX = Math.max(0, Math.min(1, x));
+      const normalizedY = Math.max(0, Math.min(1, y));
+
+      gameSessionBuffer.addCoordinates({
+        x: Math.round(normalizedX * 1000) / 1000,
+        y: Math.round(normalizedY * 1000) / 1000,
+        timestamp: now
+      });
+    }
+  };
 
   return (
     <div
@@ -271,29 +365,39 @@ const PlayingGame = ({
         className="shadow-lg p-3 flex items-center justify-between"
         style={{ backgroundColor: PRIMARY_BLUE, color: "white" }}
       >
-        <h1 className="text-xl font-bold">Piano Reaction Game</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-col">
+          <h1 className="text-xl font-bold">Piano Reaction Game</h1>
+          <span className="text-[10px] text-white/80 font-bold uppercase tracking-wider">
+            {platform === 'laptop' 
+              ? `💻 Laptop Mode - ${exerciseType === 'piano_finger' ? 'Finger Dexterity' : 'Wrist Movement (Cursor Only)'}`
+              : `📱 Mobile Mode - Wrist Movement (${mobileKeysCount} keys)`
+            }
+          </span>
+        </div>
+        <div className="flex gap-2 items-center">
           <button
             onClick={isPaused ? onResume : onPause}
-            className={`p-2 rounded-lg transition ${isPaused ? "bg-green-500 hover:bg-green-600 text-white" : "bg-red-400 hover:bg-red-500 text-white"}`}
+            className={`p-2 rounded-lg transition flex items-center gap-1 text-sm font-semibold ${
+              isPaused ? "bg-green-500 hover:bg-green-600 text-white" : "bg-yellow-400 hover:bg-yellow-500 text-gray-900"
+            }`}
           >
             {isPaused ? (
-              <Play className="w-5 h-5" />
+              <><Play className="w-4 h-4" /> Resume</>
             ) : (
-              <Pause className="w-5 h-5" />
+              <><Pause className="w-4 h-4" /> Pause</>
             )}
           </button>
           <button
             onClick={onEnd}
-            className="p-2 bg-white hover:bg-gray-200 text-gray-800 rounded-lg transition font-semibold"
+            className="p-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition text-sm font-semibold flex items-center gap-1"
           >
-            💾 Save
+            <RotateCcw className="w-4 h-4" /> End Round
           </button>
           <button
             onClick={onReset}
-            className="p-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition"
+            className="p-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition"
           >
-            <RotateCcw className="w-5 h-5" />
+            <span className="text-xs font-bold">Reset</span>
           </button>
         </div>
       </div>
@@ -332,8 +436,12 @@ const PlayingGame = ({
 
       {/* Piano Sections */}
       <div className="flex-1 flex flex-col p-4">
-        <div className="flex-1 relative mb-6 border-4 border-gray-200 rounded-xl bg-gradient-to-br from-white to-gray-50 overflow-hidden">
-          <div className="h-full flex flex-col-reverse md:flex-row">
+        <div
+          ref={containerRef}
+          onPointerMove={handlePointerMove}
+          className="flex-1 relative mb-6 border-4 border-gray-200 rounded-xl bg-gradient-to-br from-white to-gray-50 overflow-hidden"
+        >
+          <div className="h-full flex flex-col md:flex-row">
             {activeKeys.map((key, index) => {
               const isActive = currentSection === index;
               const isFeedback = index === feedbackSection;
@@ -349,26 +457,21 @@ const PlayingGame = ({
               const bgClass = isActive ? "bg-black" : "bg-white";
               const textClass = isActive ? "text-white" : "text-gray-400";
 
-              // Highlight "J" and "B" columns on mobile bigger and blue
-              const isJB =
-                (key === "J" || noteNames[index] === "B") && isMobile;
-              const fontSize = isJB
-                ? "text-6xl"
-                : currentNumSections <= 3
-                  ? "text-5xl md:text-8xl"
-                  : currentNumSections <= 6
-                    ? "text-4xl md:text-7xl"
-                    : "text-2xl md:text-5xl";
-              const extraMobileStyleClass = isJB
-                ? "bg-blue-300/40 scale-105 shadow-lg"
-                : "";
+              const fontSize = activeKeys.length <= 4
+                ? "text-6xl md:text-8xl"
+                : activeKeys.length <= 6
+                  ? "text-5xl md:text-7xl"
+                  : "text-4xl md:text-5xl";
+
+              const fingerLabel = getFingerLabel(index, activeKeys.length);
+              const isDisabled = disabledKeys && disabledKeys.includes(key);
 
               return (
                 <div
                   key={index}
-                  className={`w-full md:flex-1 flex flex-col items-center justify-center border-b md:border-r border-gray-200 last:border-b-0 md:last:border-r-0 md:last:border-b-0 transition-all duration-200 ${isActive ? "hover:bg-gray-800" : "hover:bg-gray-100"} hover:bg-gray-300 cursor-pointer ${bgClass} ${resultClass} flex-1 ${extraMobileStyleClass}`}
-                  onClick={() => handleSectionClick(index)}
-                  style={isJB ? { minHeight: "110px", minWidth: "90px" } : {}}
+                  id={`piano-key-${key}`}
+                  className={`flex-1 flex flex-col items-center justify-center min-h-[80px] border-b md:border-b-0 md:border-r border-gray-200 transition-all duration-200 ${isActive ? "hover:bg-gray-800" : "hover:bg-gray-100"} hover:bg-gray-300 cursor-pointer ${bgClass} ${resultClass} ${isDisabled ? 'opacity-50 grayscale' : ''}`}
+                  onClick={() => !isDisabled && handleSectionClick(index)}
                 >
                   <div
                     className={`${fontSize} font-bold ${textClass} transition-colors duration-200 mb-1`}
@@ -376,13 +479,13 @@ const PlayingGame = ({
                     {key}
                   </div>
                   <span
-                    className={`text-xs md:text-sm font-mono ${isActive ? "text-white/80" : "text-gray-500"} transition-colors duration-200`}
+                    className={`text-sm md:text-base font-mono ${isActive ? "text-white/80" : "text-gray-500"} transition-colors duration-200`}
                   >
                     {noteNames[index]}
                   </span>
-                  {isJB && (
-                    <span className="block text-sm text-blue-900 font-bold mt-2">
-                      Tap J / B
+                  {fingerLabel && (
+                    <span className={`block text-sm md:text-base font-bold mt-2 ${isActive ? 'text-white/95' : 'text-primary-600'}`}>
+                      {fingerLabel}
                     </span>
                   )}
                 </div>
@@ -399,26 +502,28 @@ const PlayingGame = ({
           )}
         </div>
 
-        {/* Mobile-Friendly Keyboard Hint */}
+        {/* Keyboard / Touch Hints */}
         <div className="flex justify-center flex-wrap gap-2">
           {activeKeys.map((key, index) => {
-            const isJB = (key === "J" || noteNames[index] === "B") && isMobile;
+            const fingerLabel = getFingerLabel(index, activeKeys.length);
+            const activeFinger = getFingerForKey(key);
+            const timeoutVal = (activeFinger && fingerTimeouts[activeFinger])
+              ? fingerTimeouts[activeFinger]
+              : currentLevelSpan;
             return (
               <div
                 key={key}
-                className={`px-2 py-3 rounded-lg shadow-lg border-2 text-center touch-manipulation ${isJB ? "bg-blue-500 scale-105" : ""}`}
+                className="px-4 py-3 rounded-lg shadow-lg border-2 text-center touch-manipulation min-w-[70px]"
                 style={{
-                  backgroundColor: isJB ? "#baf5fe" : LIGHT_BLUE,
+                  backgroundColor: LIGHT_BLUE,
                   borderColor: PRIMARY_BLUE,
                 }}
               >
-                <p className="text-xs text-white font-semibold">Tap</p>
-                <p className="text-2xl font-bold text-white">{key}</p>
-                <p className="text-xs text-white/80">{noteNames[index]}</p>
-                {isJB && (
-                  <span className="block text-sm text-blue-900 font-bold mt-2">
-                    J / B big!
-                  </span>
+                <p className="text-xs md:text-sm text-white font-semibold">{fingerLabel || 'Key'}</p>
+                <p className="text-3xl md:text-4xl font-bold text-white">{key}</p>
+                <p className="text-sm text-white/80">{noteNames[index]}</p>
+                {(platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) && (
+                  <p className="text-xs md:text-sm text-white/95 font-bold mt-1">({timeoutVal}s)</p>
                 )}
               </div>
             );
@@ -426,16 +531,17 @@ const PlayingGame = ({
         </div>
       </div>
 
-      {/* Handle key presses - invisible focus */}
-      {isPaused ? null : (
+      <SaveExitButton onBeforeSave={onBeforeSave} />
+
+      {!isPaused && (
         <div
           tabIndex={-1}
           className="invisible fixed inset-0"
           onKeyDown={(e) => {
+            if (exerciseType === 'piano_ankle') return;
             const userKey = e.key.toLowerCase();
-            if (
-              ["a", "s", "d", "f", "g", "h", "j", "k", "l"].includes(userKey)
-            ) {
+            const activeKeysLower = activeKeys.map(k => k.toLowerCase());
+            if (activeKeysLower.includes(userKey)) {
               e.preventDefault();
               handleKeyPress(e.key);
             }
@@ -452,7 +558,7 @@ const PianoReactionGame = () => {
   const { user, isDarkMode } = useAuth();
   const navigate = useNavigate();
 
-  // Detect if mobile screen for responsive keys
+  // Detect screen size
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 640);
   useEffect(() => {
     const resizeListener = () => setIsMobile(window.innerWidth <= 640);
@@ -460,11 +566,51 @@ const PianoReactionGame = () => {
     return () => window.removeEventListener("resize", resizeListener);
   }, []);
 
-  // State variables
+  // Platform & Exercise Config
+  const [platform, setPlatform] = useState(() => {
+    const saved = localStorage.getItem("piano_platform");
+    if (saved) return saved;
+    const hasTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+    const isMobileSize = window.innerWidth <= 768;
+    return (hasTouch && isMobileSize) ? "mobile" : "laptop";
+  });
+
+  const [exerciseType, setExerciseType] = useState(() => {
+    return localStorage.getItem("piano_exercise_type") || "piano_ankle";
+  });
+
+  const [keyboardLayout, setKeyboardLayout] = useState(() => {
+    return localStorage.getItem("piano_keyboard_layout") || "both";
+  });
+
+  const [mobileKeysCount, setMobileKeysCount] = useState(() => {
+    const saved = localStorage.getItem("piano_mobile_keys_count");
+    return saved ? parseInt(saved, 10) : 4;
+  });
+
+  const [fingerTimeouts, setFingerTimeouts] = useState(() => {
+    const saved = localStorage.getItem("piano_finger_timeouts");
+    const defaults = {
+      thumb: 5, index: 5, middle: 5, ring: 5, pinky: 5,
+      leftPinky: 5, leftRing: 5, leftMiddle: 5, leftIndex: 5,
+      rightIndex: 5, rightMiddle: 5, rightRing: 5, rightPinky: 5
+    };
+    if (saved) {
+      try { return { ...defaults, ...JSON.parse(saved) }; } catch (e) {}
+    }
+    return defaults;
+  });
+
+  const [disabledKeys, setDisabledKeys] = useState(() => {
+    const saved = localStorage.getItem("piano_disabled_keys");
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  // Base state settings
   const [isOnboarding, setIsOnboarding] = useState(true);
   const [currentLevelSpan, setCurrentLevelSpan] = useState(5);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentNumSections, setCurrentNumSections] = useState(2);
+  const [currentNumSections, setCurrentNumSections] = useState(4); // Default to 4 keys for Laptop Ankle
   const [isPaused, setIsPaused] = useState(false);
   const [currentSection, setCurrentSection] = useState(null);
   const [playData, setPlayData] = useState([]);
@@ -472,83 +618,201 @@ const PianoReactionGame = () => {
   const [attemptCount, setAttemptCount] = useState(0);
   const [feedbackSection, setFeedbackSection] = useState(null);
   const [feedbackType, setFeedbackType] = useState(null);
-  const [showSettings, setShowSettings] = useState(false);
-  const [tempLevelSpan, setTempLevelSpan] = useState(5);
-  const [tempNumSections, setTempNumSections] = useState(2);
 
   const keysAll = ["A", "S", "D", "F", "G", "H", "J", "K", "L"];
-  // const noteNamesAll = ['C', 'D', 'E', 'F', 'G', 'A', 'B', 'C', 'D'];
   const noteNamesAll = ["A", "S", "D", "F", "G", "H", "J", "K", "L"];
-
   const frequencies = [
     261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25, 587.33,
   ];
 
   const sectionTimerRef = useRef(null);
+  const lastPressedKeyRef = useRef(null);
   const audioContextRef = useRef(null);
 
-  // Load settings on mount
+  // Sync to localStorage
+  useEffect(() => {
+    localStorage.setItem("piano_platform", platform);
+  }, [platform]);
+
+  useEffect(() => {
+    localStorage.setItem("piano_exercise_type", exerciseType);
+  }, [exerciseType]);
+
+  useEffect(() => {
+    localStorage.setItem("piano_keyboard_layout", keyboardLayout);
+  }, [keyboardLayout]);
+
+  useEffect(() => {
+    localStorage.setItem("piano_mobile_keys_count", mobileKeysCount.toString());
+  }, [mobileKeysCount]);
+
+  useEffect(() => {
+    localStorage.setItem("piano_finger_timeouts", JSON.stringify(fingerTimeouts));
+  }, [fingerTimeouts]);
+
+  // Load backend configurations
   useEffect(() => {
     const loadSettings = async () => {
       try {
         const response = await gameService.getSettings();
         setCurrentLevelSpan(response.currentlevelspan || 5);
-        setCurrentNumSections(response.currentnumsections || 7);
-        setTempLevelSpan(response.currentlevelspan || 5);
-        setTempNumSections(response.currentnumsections || 7);
+        setCurrentNumSections(response.currentnumsections || 4);
       } catch (error) {
         console.error("Failed to load settings:", error);
-        setCurrentLevelSpan(5);
-        setCurrentNumSections(7);
-        setTempLevelSpan(5);
-        setTempNumSections(7);
       }
     };
     loadSettings();
+
     return () => {
       if (sectionTimerRef.current) clearTimeout(sectionTimerRef.current);
     };
   }, []);
 
-  // Active keys limited by mobile for fewer keys on phone
-  const activeKeys = isMobile
-    ? keysAll.slice(0, Math.min(currentNumSections, 4)) // max 6 keys on mobile
-    : keysAll.slice(0, currentNumSections);
-  const noteNames = isMobile
-    ? noteNamesAll.slice(0, Math.min(currentNumSections, 4))
-    : noteNamesAll.slice(0, currentNumSections);
+  // Sync exerciseType with Platform
+  useEffect(() => {
+    if (platform === "mobile") {
+      setExerciseType("piano_finger");
+    }
+  }, [platform]);
 
-  // --- Audio helpers ---
+  const saveFingerTimeoutsToStorage = (timeouts) => {
+    setFingerTimeouts(timeouts);
+  };
+
+  const getFingerKeyLabel = (fingerName) => {
+    if (platform === 'mobile') {
+      if (mobileKeysCount === 4) {
+        if (fingerName === 'pinky') return 'A';
+        if (fingerName === 'ring') return 'S';
+        if (fingerName === 'middle') return 'D';
+        if (fingerName === 'index') return 'F';
+      } else {
+        if (fingerName === 'thumb') return 'A';
+        if (fingerName === 'index') return 'S';
+        if (fingerName === 'middle') return 'D';
+        if (fingerName === 'ring') return 'F';
+        if (fingerName === 'pinky') return 'G';
+      }
+    } else {
+      if (keyboardLayout === 'both') {
+        if (fingerName === 'pinky') return 'A / L';
+        if (fingerName === 'ring') return 'S / K';
+        if (fingerName === 'middle') return 'D / J';
+        if (fingerName === 'index') return 'F / H';
+      } else if (keyboardLayout === 'left') {
+        if (fingerName === 'pinky') return 'A';
+        if (fingerName === 'ring') return 'S';
+        if (fingerName === 'middle') return 'D';
+        if (fingerName === 'index') return 'F';
+      } else {
+        if (fingerName === 'pinky') return 'L';
+        if (fingerName === 'ring') return 'K';
+        if (fingerName === 'middle') return 'J';
+        if (fingerName === 'index') return 'H';
+      }
+    }
+    return '';
+  };
+
+  const getFingerForKey = (key) => {
+    const k = key.toUpperCase();
+    if (platform === 'laptop') {
+      if (exerciseType === 'piano_finger') {
+        if (keyboardLayout === 'both') {
+          if (k === 'A') return 'leftPinky';
+          if (k === 'S') return 'leftRing';
+          if (k === 'D') return 'leftMiddle';
+          if (k === 'F') return 'leftIndex';
+          if (k === 'H') return 'rightIndex';
+          if (k === 'J') return 'rightMiddle';
+          if (k === 'K') return 'rightRing';
+          if (k === 'L') return 'rightPinky';
+        } else if (keyboardLayout === 'left') {
+          if (k === 'A') return 'leftPinky';
+          if (k === 'S') return 'leftRing';
+          if (k === 'D') return 'leftMiddle';
+          if (k === 'F') return 'leftIndex';
+        } else {
+          if (k === 'H') return 'rightIndex';
+          if (k === 'J') return 'rightMiddle';
+          if (k === 'K') return 'rightRing';
+          if (k === 'L') return 'rightPinky';
+        }
+      }
+    } else {
+      if (mobileKeysCount === 4) {
+        const fingers = ['pinky', 'ring', 'middle', 'index'];
+        const idx = activeKeys.indexOf(k);
+        return fingers[idx] || null;
+      } else if (mobileKeysCount === 5) {
+        const fingers = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+        const idx = activeKeys.indexOf(k);
+        return fingers[idx] || null;
+      }
+    }
+    return null;
+  };
+
+  const activeKeys = (() => {
+    if (platform === 'mobile') {
+      return keysAll.slice(0, mobileKeysCount);
+    } else {
+      if (exerciseType === 'piano_finger') {
+        if (keyboardLayout === 'both') {
+          return ['A', 'S', 'D', 'F', 'H', 'J', 'K', 'L'];
+        }
+        return keyboardLayout === 'left' ? ['A', 'S', 'D', 'F'] : ['H', 'J', 'K', 'L'];
+      } else {
+        return keysAll.slice(0, currentNumSections);
+      }
+    }
+  })();
+
+  const noteNames = (() => {
+    if (platform === 'mobile') {
+      return noteNamesAll.slice(0, mobileKeysCount);
+    } else {
+      if (exerciseType === 'piano_finger') {
+        if (keyboardLayout === 'both') {
+          return ['A', 'S', 'D', 'F', 'H', 'J', 'K', 'L'];
+        }
+        return keyboardLayout === 'left' ? ['A', 'S', 'D', 'F'] : ['H', 'J', 'K', 'L'];
+      } else {
+        return noteNamesAll.slice(0, currentNumSections);
+      }
+    }
+  })();
+
+  // Audio helpers
   const playPianoSound = (keyIndex) => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new (
-        window.AudioContext || window.webkitAudioContext
-      )();
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
     }
     const audioContext = audioContextRef.current;
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
     oscillator.connect(gainNode);
     gainNode.connect(audioContext.destination);
-    oscillator.frequency.value = frequencies[keyIndex];
+    oscillator.frequency.value = frequencies[keyIndex] || 261.63;
     oscillator.type = "sine";
     gainNode.gain.setValueAtTime(0, audioContext.currentTime);
     gainNode.gain.linearRampToValueAtTime(0.3, audioContext.currentTime + 0.01);
-    gainNode.gain.exponentialRampToValueAtTime(
-      0.01,
-      audioContext.currentTime + 1.5,
-    );
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 1.5);
     oscillator.start(audioContext.currentTime);
     oscillator.stop(audioContext.currentTime + 1.5);
   };
 
   const playFeedbackSound = (type) => {
     if (!audioContextRef.current) {
-      audioContextRef.current = new (
-        window.AudioContext || window.webkitAudioContext
-      )();
+      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
     }
     const audioContext = audioContextRef.current;
+    if (audioContext.state === 'suspended') {
+      audioContext.resume();
+    }
     const oscillator = audioContext.createOscillator();
     const gainNode = audioContext.createGain();
     oscillator.connect(gainNode);
@@ -561,36 +825,62 @@ const PianoReactionGame = () => {
       oscillator.frequency.value = 800;
       oscillator.type = "sine";
       gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(
-        0.01,
-        audioContext.currentTime + 0.2,
-      );
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + 0.2);
     } else if (type === "incorrect") {
       oscillator.frequency.value = 200;
       oscillator.type = "sawtooth";
       gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(
-        0.01,
-        audioContext.currentTime + 0.3,
-      );
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + 0.3);
     } else if (type === "notdone") {
       oscillator.frequency.value = 400;
       oscillator.type = "triangle";
       gainNode.gain.setValueAtTime(0.2, audioContext.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(
-        0.01,
-        audioContext.currentTime + 0.15,
-      );
+      gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
       oscillator.start(audioContext.currentTime);
       oscillator.stop(audioContext.currentTime + 0.15);
     }
   };
 
-  // Start game core
+  const recordLaptopMovement = (userKey) => {
+    if (platform !== 'laptop') return;
+    const elCurrent = document.getElementById(`piano-key-${userKey}`);
+    if (elCurrent) {
+      const rectCurrent = elCurrent.getBoundingClientRect();
+      const currentX = rectCurrent.left + rectCurrent.width / 2 + window.scrollX;
+      const currentY = rectCurrent.top + rectCurrent.height / 2 + window.scrollY;
+
+      if (lastPressedKeyRef.current) {
+        const elPrev = document.getElementById(`piano-key-${lastPressedKeyRef.current}`);
+        if (elPrev) {
+          const rectPrev = elPrev.getBoundingClientRect();
+          const prevX = rectPrev.left + rectPrev.width / 2 + window.scrollX;
+          const prevY = rectPrev.top + rectPrev.height / 2 + window.scrollY;
+
+          const dx = currentX - prevX;
+          const dy = currentY - prevY;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          gameSessionBuffer.addLaptopMovement({
+            fromKey: lastPressedKeyRef.current,
+            toKey: userKey,
+            dx: Math.round(dx * 100) / 100,
+            dy: Math.round(dy * 100) / 100,
+            distance: Math.round(distance * 100) / 100,
+            fromX: Math.round(prevX * 100) / 100,
+            fromY: Math.round(prevY * 100) / 100,
+            toX: Math.round(currentX * 100) / 100,
+            toY: Math.round(currentY * 100) / 100
+          });
+        }
+      }
+      lastPressedKeyRef.current = userKey;
+    }
+  };
+
   const startGame = () => {
     setIsPlaying(true);
     setIsPaused(false);
@@ -600,42 +890,104 @@ const PianoReactionGame = () => {
     setFeedbackSection(null);
     setFeedbackType(null);
     setSectionStartTime(Date.now());
-    // Init local session buffer
-    gameSessionBuffer.init('type1', 'Piano Reaction Game');
-    gameSessionBuffer.update({ levelspan: currentLevelSpan });
+    lastPressedKeyRef.current = null;
+    
+    const targetGameType = exerciseType;
+    const targetGameName = exerciseType === 'piano_finger' ? 'Piano - Finger Dexterity' : 'Piano - Wrist Movement';
+
+    let activeFingerTimeouts = null;
+    if (platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) {
+      activeFingerTimeouts = {
+        leftPinky: -1, leftRing: -1, leftMiddle: -1, leftIndex: -1,
+        rightIndex: -1, rightMiddle: -1, rightRing: -1, rightPinky: -1,
+        thumb: -1, index: -1, middle: -1, ring: -1, pinky: -1
+      };
+      activeKeys.forEach(k => {
+        const f = getFingerForKey(k);
+        if (f) {
+          activeFingerTimeouts[f] = disabledKeys.includes(k) ? 0 : (fingerTimeouts[f] || 5);
+        }
+      });
+    }
+
+    gameSessionBuffer.init(targetGameType, targetGameName);
+    gameSessionBuffer.update({
+      levelspan: currentLevelSpan,
+      mode: platform,
+      fingerTimeouts: activeFingerTimeouts,
+      laptopMovements: [],
+      mobileMovements: []
+    });
     showNextSection();
   };
 
-  // Show next piano section randomly
-  const showNextSection = () => {
-    const randomSection = Math.floor(Math.random() * activeKeys.length);
+  const toggleDisableKey = (key) => {
+    setDisabledKeys(prev => {
+      const newKeys = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
+      localStorage.setItem("piano_disabled_keys", JSON.stringify(newKeys));
+      return newKeys;
+    });
+  };
+
+  const showNextSection = (prevSection = null) => {
+    const current = prevSection !== null ? prevSection : currentSection;
+    const validSections = activeKeys.map((key, idx) => ({ key, idx })).filter(item => !disabledKeys.includes(item.key));
+    
+    let randomSection = current;
+    if (validSections.length > 1) {
+      do {
+        const randomIndex = Math.floor(Math.random() * validSections.length);
+        randomSection = validSections[randomIndex].idx;
+      } while (randomSection === current);
+    } else if (validSections.length === 1) {
+      randomSection = validSections[0].idx;
+    } else {
+      randomSection = 0;
+    }
+    
     setCurrentSection(randomSection);
     setSectionStartTime(Date.now());
     setAttemptCount((old) => old + 1);
     if (sectionTimerRef.current) clearTimeout(sectionTimerRef.current);
+
+    const targetKey = activeKeys[randomSection];
+    const activeFinger = getFingerForKey(targetKey);
+    const timeoutSec = (activeFinger && fingerTimeouts[activeFinger])
+      ? fingerTimeouts[activeFinger]
+      : currentLevelSpan;
+
     sectionTimerRef.current = setTimeout(() => {
       if (isPlaying && !isPaused) {
-        recordResponse("none", -1, 0, keysAll[randomSection]);
+        recordResponse("none", -1, 0, activeKeys[randomSection]);
+        if (platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) {
+          gameSessionBuffer.addMobileMovement({
+            key: 'none',
+            finger: 'none',
+            expectedFinger: activeFinger || 'unknown',
+            responsetime: -1,
+            correct: 0
+          });
+        }
         setFeedbackSection(randomSection);
         setFeedbackType("notdone");
         playFeedbackSound("notdone");
         setTimeout(() => {
           setFeedbackSection(null);
           setFeedbackType(null);
-          showNextSection();
+          showNextSection(randomSection);
         }, 300);
       }
-    }, currentLevelSpan * 1000);
+    }, timeoutSec * 1000);
   };
 
-  // Key press handler (keyboard or click)
   const handleKeyPress = (key) => {
     if (!isPlaying || isPaused || currentSection === null) return;
     const responseTime = (Date.now() - sectionStartTime) / 1000;
     const userKey = key.toUpperCase();
-    const expectedKey = keysAll[currentSection];
-    const userIndex = keysAll.indexOf(userKey);
+    const expectedKey = activeKeys[currentSection];
+    const userIndex = activeKeys.indexOf(userKey);
     let correct;
+
     if (userKey === expectedKey) {
       correct = 1;
     } else if (
@@ -643,26 +995,45 @@ const PianoReactionGame = () => {
     ) {
       correct = -1;
     } else {
-      return; // ignore keys outside range
+      return;
     }
+
     if (sectionTimerRef.current) clearTimeout(sectionTimerRef.current);
     const roundedTime = Math.round(responseTime * 10) / 10;
     recordResponse(userKey, roundedTime, correct, expectedKey);
+
+    if (platform === 'laptop') {
+      recordLaptopMovement(userKey);
+    }
+    if (platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) {
+      const expectedFinger = getFingerForKey(expectedKey);
+      const pressedFinger = getFingerForKey(userKey);
+      gameSessionBuffer.addMobileMovement({
+        key: userKey,
+        finger: pressedFinger || 'unknown',
+        expectedFinger: expectedFinger || 'unknown',
+        responsetime: roundedTime,
+        correct
+      });
+    }
+
     playFeedbackSound(correct === 1 ? "correct" : "incorrect");
     setFeedbackSection(userIndex);
     setFeedbackType(correct === 1 ? "correct" : "incorrect");
     setTimeout(() => {
       setFeedbackSection(null);
       setFeedbackType(null);
-      showNextSection();
+      showNextSection(currentSection);
     }, 300);
   };
 
   const handleSectionClick = (clickedIndex) => {
     if (!isPlaying || isPaused || currentSection === null) return;
     const responseTime = (Date.now() - sectionStartTime) / 1000;
-    const userKey = keysAll[clickedIndex];
+    const userKey = activeKeys[clickedIndex];
+    const expectedKey = activeKeys[currentSection];
     let correct;
+
     if (clickedIndex === currentSection) {
       correct = 1;
     } else if (clickedIndex < activeKeys.length) {
@@ -670,37 +1041,48 @@ const PianoReactionGame = () => {
     } else {
       return;
     }
+
     if (sectionTimerRef.current) clearTimeout(sectionTimerRef.current);
     const roundedTime = Math.round(responseTime * 10) / 10;
-    recordResponse(userKey, roundedTime, correct, keysAll[currentSection]);
+    recordResponse(userKey, roundedTime, correct, expectedKey);
+
+    if (platform === 'laptop') {
+      recordLaptopMovement(userKey);
+    }
+    if (platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) {
+      const expectedFinger = getFingerForKey(expectedKey);
+      const pressedFinger = getFingerForKey(userKey);
+      gameSessionBuffer.addMobileMovement({
+        key: userKey,
+        finger: pressedFinger || 'unknown',
+        expectedFinger: expectedFinger || 'unknown',
+        responsetime: roundedTime,
+        correct
+      });
+    }
+
     playFeedbackSound(correct === 1 ? "correct" : "incorrect");
     setFeedbackSection(clickedIndex);
     setFeedbackType(correct === 1 ? "correct" : "incorrect");
     setTimeout(() => {
       setFeedbackSection(null);
       setFeedbackType(null);
-      showNextSection();
+      showNextSection(currentSection);
     }, 300);
   };
 
   const recordResponse = (userResponse, responsetime, correct, shownKey) => {
-    const entry = {
-      responsetime,
-      correct,
-    };
+    const entry = { responsetime, correct };
     setPlayData((prev) => [...prev, entry]);
-    // Buffer locally
     gameSessionBuffer.addPlayEntry(entry);
-    console.log(
-      `Key: ${shownKey}, User: ${userResponse}, Time: ${responsetime}s, Correct: ${correct}`,
-    );
   };
 
-  // Keydown listener for full window keyboard control
   useEffect(() => {
     const onKeyDown = (e) => {
+      if (exerciseType === 'piano_ankle') return;
       const userKey = e.key.toLowerCase();
-      if (["a", "s", "d", "f", "g", "h", "j", "k", "l"].includes(userKey)) {
+      const activeKeysLower = activeKeys.map(k => k.toLowerCase());
+      if (activeKeysLower.includes(userKey)) {
         e.preventDefault();
         handleKeyPress(e.key);
       }
@@ -710,9 +1092,8 @@ const PianoReactionGame = () => {
     }
     return () => window.removeEventListener("keydown", onKeyDown);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [isPlaying, isPaused, currentSection, exerciseType, activeKeys, currentLevelSpan]);
 
-  // End current round (does NOT save to backend)
   const endGame = () => {
     setIsPlaying(false);
     setCurrentSection(null);
@@ -721,7 +1102,6 @@ const PianoReactionGame = () => {
       alert("No data recorded. Play at least one round!");
       return;
     }
-    // Update local buffer with score
     const calculatedScore = playData.reduce((acc, p) => {
       if (p.correct === 1) return acc + 10;
       if (p.correct === -1) return acc - 5;
@@ -738,7 +1118,6 @@ const PianoReactionGame = () => {
     }
   };
 
-  // Finalize buffer data right before Save & Exit pushes to backend
   const handleBeforeSave = () => {
     const calculatedScore = playData.reduce((acc, p) => {
       if (p.correct === 1) return acc + 10;
@@ -746,7 +1125,26 @@ const PianoReactionGame = () => {
       return acc;
     }, 0);
     const finalScore = Math.max(0, calculatedScore);
-    gameSessionBuffer.update({ sessionScore: finalScore });
+    let activeFingerTimeouts = null;
+    if (platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) {
+      activeFingerTimeouts = {
+        leftPinky: -1, leftRing: -1, leftMiddle: -1, leftIndex: -1,
+        rightIndex: -1, rightMiddle: -1, rightRing: -1, rightPinky: -1,
+        thumb: -1, index: -1, middle: -1, ring: -1, pinky: -1
+      };
+      activeKeys.forEach(k => {
+        const f = getFingerForKey(k);
+        if (f) {
+          activeFingerTimeouts[f] = disabledKeys.includes(k) ? 0 : (fingerTimeouts[f] || 5);
+        }
+      });
+    }
+
+    gameSessionBuffer.update({
+      sessionScore: finalScore,
+      mode: platform,
+      fingerTimeouts: activeFingerTimeouts
+    });
   };
 
   const pauseGame = () => {
@@ -757,19 +1155,34 @@ const PianoReactionGame = () => {
   const resumeGame = () => {
     setIsPaused(false);
     setSectionStartTime(Date.now());
+    const targetKey = activeKeys[currentSection];
+    const activeFinger = getFingerForKey(targetKey);
+    const timeoutSec = (activeFinger && fingerTimeouts[activeFinger])
+      ? fingerTimeouts[activeFinger]
+      : currentLevelSpan;
+
     sectionTimerRef.current = setTimeout(() => {
       if (isPlaying && !isPaused) {
-        recordResponse("none", -1, 0, keysAll[currentSection]);
+        recordResponse("none", -1, 0, activeKeys[currentSection]);
+        if (platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) {
+          gameSessionBuffer.addMobileMovement({
+            key: 'none',
+            finger: 'none',
+            expectedFinger: activeFinger || 'unknown',
+            responsetime: -1,
+            correct: 0
+          });
+        }
         setFeedbackSection(currentSection);
         setFeedbackType("notdone");
         playFeedbackSound("notdone");
         setTimeout(() => {
           setFeedbackSection(null);
           setFeedbackType(null);
-          showNextSection();
+          showNextSection(currentSection);
         }, 300);
       }
-    }, currentLevelSpan * 1000);
+    }, timeoutSec * 1000);
   };
 
   const resetGame = () => {
@@ -781,30 +1194,21 @@ const PianoReactionGame = () => {
     if (sectionTimerRef.current) clearTimeout(sectionTimerRef.current);
   };
 
-  // Save settings function
   const saveSettings = async () => {
     try {
-      await gameService.updateSettings(user.id, tempLevelSpan, tempNumSections);
-      setCurrentLevelSpan(tempLevelSpan);
-      setCurrentNumSections(tempNumSections);
-      setShowSettings(false);
-      alert("Settings updated successfully!");
+      await gameService.updateSettings(user.id, currentLevelSpan, currentNumSections);
+      alert("Backend settings updated successfully!");
     } catch (error) {
-      alert("Failed to update settings");
+      alert("Failed to update settings on backend");
     }
   };
 
-  // Stats calculation
   const correctCount = playData.filter((p) => p.correct === 1).length;
   const incorrectCount = playData.filter((p) => p.correct === -1).length;
   const notDoneCount = playData.filter((p) => p.correct === 0).length;
-  const accuracy =
-    correctCount + incorrectCount > 0
-      ? Math.round((correctCount / (correctCount + incorrectCount)) * 100)
-      : 0;
-
-  // --- Rendering ---
-  // Remove redundant declaration
+  const accuracy = correctCount + incorrectCount > 0
+    ? Math.round((correctCount / (correctCount + incorrectCount)) * 100)
+    : 0;
 
   if (isOnboarding) {
     return (
@@ -826,6 +1230,7 @@ const PianoReactionGame = () => {
         onResume={resumeGame}
         onEnd={endGame}
         onReset={resetGame}
+        onBeforeSave={handleBeforeSave}
         currentSection={currentSection}
         feedbackSection={feedbackSection}
         feedbackType={feedbackType}
@@ -841,248 +1246,465 @@ const PianoReactionGame = () => {
         handleKeyPress={handleKeyPress}
         isMobile={isMobile}
         isDarkMode={isDarkMode}
+        platform={platform}
+        exerciseType={exerciseType}
+        keyboardLayout={keyboardLayout}
+        mobileKeysCount={mobileKeysCount}
+        fingerTimeouts={fingerTimeouts}
+        disabledKeys={disabledKeys}
       />
     );
   }
 
-  // Main setup screen after onboarding, before playing
   return (
-    <div
-      className={`min-h-screen p-4 md:p-8 transition-colors duration-300 ${isDarkMode ? "bg-black text-white" : "bg-gray-50 text-gray-900"}`}
-    >
+    <div className={`min-h-screen p-4 md:p-8 transition-colors duration-300 ${isDarkMode ? "bg-black text-white" : "bg-gray-50 text-gray-900"}`}>
       <div className="max-w-6xl mx-auto space-y-8">
-        {/* Header */}
+        
+        {/* Header Banner */}
         <div
-          className="rounded-xl shadow-lg p-4 md:p-6 mb-4 md:mb-6 flex items-center justify-between text-white"
-          style={{
-            background: `linear-gradient(90deg, ${PRIMARY_BLUE}, ${LIGHT_BLUE})`,
-          }}
+          className="rounded-2xl shadow-xl p-6 flex flex-col md:flex-row items-center justify-between text-white transition-all hover:scale-[1.01]"
+          style={{ background: `linear-gradient(135deg, ${PRIMARY_BLUE}, ${LIGHT_BLUE})` }}
         >
           <div>
-            <h1 className="text-2xl md:text-3xl font-bold">
-              Piano Reaction Game
-            </h1>
-            <p className="text-white/90">
-              Tap the highlighted (black) piano key section
-            </p>
-            <p className="text-sm text-white/70 mt-1">
-              Level Span: {currentLevelSpan} seconds | Keys:{" "}
-              {currentNumSections}
-            </p>
-          </div>
-          <div className="flex gap-2 md:gap-3">
-            <button
-              onClick={() => setShowSettings(true)}
-              className="p-2 md:p-3 bg-white/30 hover:bg-white/50 rounded-lg transition text-white"
-            >
-              <Settings className="w-5 h-5 md:w-6 md:h-6" />
-            </button>
-            <button
-              onClick={() => navigate(-1)}
-              className="p-2 md:p-3 bg-white/30 hover:bg-white/50 rounded-lg transition text-white"
-            >
-              <Home className="w-5 h-5 md:w-6 md:h-6" />
-            </button>
-          </div>
-        </div>
-
-        {/* Stats Row */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="premium-card p-6 text-center">
-            <p className="text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">
-              Attempts
-            </p>
-            <p className="text-3xl font-black dark:text-white">
-              {attemptCount}
-            </p>
-          </div>
-          <div className="premium-card p-6 text-center border-l-4 border-l-green-500">
-            <p className="text-[10px] font-black uppercase tracking-widest text-green-500 mb-2">
-              Correct
-            </p>
-            <p className="text-3xl font-black text-green-600 dark:text-green-400">
-              {correctCount}
-            </p>
-          </div>
-          <div className="premium-card p-6 text-center border-l-4 border-l-red-500">
-            <p className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-2">
-              Incorrect
-            </p>
-            <p className="text-3xl font-black text-red-600 dark:text-red-400">
-              {incorrectCount}
-            </p>
-          </div>
-          <div className="premium-card p-6 text-center border-l-4 border-l-yellow-500">
-            <p className="text-[10px] font-black uppercase tracking-widest text-yellow-500 mb-2">
-              Not Done
-            </p>
-            <p className="text-3xl font-black text-yellow-600 dark:text-yellow-400">
-              {notDoneCount}
-            </p>
-          </div>
-          <div className="premium-card p-6 text-center border-l-4 border-l-primary-500">
-            <p className="text-[10px] font-black uppercase tracking-widest text-primary-500 mb-2">
-              Accuracy
-            </p>
-            <p className="text-3xl font-black text-primary-600 dark:text-primary-400">
-              {accuracy}%
-            </p>
-          </div>
-        </div>
-
-        {/* Game Area */}
-        <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl p-4 md:p-8 mb-4 md:mb-6 border dark:border-gray-800">
-          <h2 className="text-xl md:text-2xl font-bold mb-4 md:mb-6 dark:text-white">
-            Let's Warm Up!
-          </h2>
-          <div className="relative h-[60vh] md:h-64 mb-6 md:mb-8 border-4 border-gray-200 dark:border-gray-800 rounded-xl bg-white dark:bg-gray-950 overflow-hidden">
-            <div className="h-full flex flex-col-reverse md:flex-row">
-              {activeKeys.map((key, index) => {
-                const bgClass = "bg-white";
-                const textClass = "text-gray-400";
-                const fontSize =
-                  currentNumSections <= 3
-                    ? "text-6xl md:text-9xl"
-                    : currentNumSections <= 6
-                      ? "text-4xl md:text-7xl"
-                      : "text-3xl md:text-5xl";
-
-                return (
-                  <div
-                    key={index}
-                    className={`w-full md:flex-1 flex flex-col items-center justify-center border-b md:border-r border-gray-200 last:border-b-0 md:last:border-r-0 md:last:border-b-0 ${bgClass} flex-1`}
-                  >
-                    <div className={`${fontSize} font-bold ${textClass} mb-1`}>
-                      {key}
-                    </div>
-                    <span className="text-xs md:text-sm font-mono text-gray-500">
-                      {noteNames[index]}
-                    </span>
-                  </div>
-                );
-              })}
+            <h1 className="text-3xl font-extrabold tracking-tight">Piano Reaction Game</h1>
+            <p className="text-white/90 mt-1 font-medium">Coordinate, reaction, and fine-motor control rehabilitation.</p>
+            <div className="flex gap-4 mt-3 text-xs font-semibold text-white/80 uppercase tracking-wider">
+              <span>Platform: {platform === 'laptop' ? '💻 Laptop' : '📱 Mobile'}</span>
+              <span>•</span>
+              <span>Exercise: {exerciseType === 'piano_finger' ? '🖐️ Finger Dexterity' : '⌚ Wrist Movement'}</span>
+              <span>•</span>
+              <span>Active Keys: {activeKeys.length}</span>
             </div>
-            {!isPlaying && (
-              <div className="absolute inset-0 flex items-center justify-center bg-white/90 dark:bg-black/90">
-                <div className="text-center p-4">
-                  <p className="text-2xl md:text-3xl text-gray-400 mb-4 font-bold">
-                    Ready to Play?
-                  </p>
-                  <div className="space-y-2 text-base md:text-lg text-gray-600">
-                    <p>🎹 Tap the highlighted (black) piano key</p>
-                    <p className="text-sm text-gray-500 mt-4">
-                      You have {currentLevelSpan} seconds to respond
-                    </p>
-                  </div>
+          </div>
+          <div className="flex gap-3 mt-4 md:mt-0">
+            <button
+              onClick={() => navigate(user?.type === 'doctor' ? '/doctor/dashboard' : '/patient/dashboard')}
+              className="p-3 bg-white/20 hover:bg-white/40 rounded-xl transition text-white backdrop-blur-md shadow-lg"
+              title="Go back to Dashboard"
+            >
+              <Home className="w-6 h-6" />
+            </button>
+          </div>
+        </div>
+
+        {/* Setup Configuration Panel & Setup Preview Grid */}
+        <div className="gap-x-12">
+          
+          
+
+          {/* Setup Preview & Start Button */}
+          <div className="lg:col-span-5 space-y-6">
+            
+            {/* Piano layout preview */}
+            <div className="bg-white mb-4 dark:bg-gray-900 border dark:border-gray-800 rounded-3xl p-6 shadow-xl justify-between h-full min-h-[350px]">
+              <div>
+                <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-2">🎹 Playboard Preview</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  {platform === 'laptop' && exerciseType === 'piano_finger'
+                    ? `Selected keyboard keys: ${activeKeys.join(', ')}`
+                    : `Active interactive keys on play screen: ${activeKeys.join(', ')}`
+                  }
+                </p>
+                
+                {/* Visual piano grid */}
+                <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden mt-6 h-36 flex bg-gray-50 dark:bg-gray-950">
+                  {activeKeys.map((key, idx) => {
+                    const isDisabled = disabledKeys.includes(key);
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => toggleDisableKey(key)}
+                        className={`cursor-pointer border-r border-gray-200 dark:border-gray-800 last:border-0 flex-1 flex flex-col items-center justify-center p-2 transition-all ${
+                          isDisabled 
+                            ? 'bg-gray-200 dark:bg-gray-800 opacity-50 grayscale' 
+                            : 'bg-white dark:bg-gray-900 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="text-2xl font-black text-gray-400">{key}</span>
+                        <span className="text-[10px] text-gray-400 font-mono mt-1">{noteNames[idx]}</span>
+                        {isDisabled && <span className="text-[9px] text-red-500 font-bold mt-1">DISABLED</span>}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-            )}
-          </div>
 
-          {/* Controls */}
-          <div className="flex gap-2 md:gap-4 justify-center flex-wrap">
-            {!isPlaying ? (
-              <button
-                onClick={startGame}
-                className="flex items-center gap-2 px-6 md:px-8 py-3 md:py-4 text-white rounded-lg font-semibold hover:shadow-lg transition shadow-md text-base md:text-lg min-w-[120px]"
-                style={{
-                  background: `linear-gradient(90deg, ${PRIMARY_BLUE}, ${LIGHT_BLUE})`,
-                }}
-              >
-                <Play className="w-5 h-5 md:w-6 md:h-6" />
-                Start Game
-              </button>
-            ) : null}
-          </div>
-
-          {/* Keyboard Hint - Responsive */}
-          <div className="mt-4 md:mt-8 flex justify-center flex-col md:flex-row gap-2">
-            {activeKeys.map((key, index) => {
-              const isJB =
-                (key === "J" || noteNames[index] === "B") && isMobile;
-              return (
-                <div
-                  key={key}
-                  className={`px-3 md:px-4 py-2 md:py-3 rounded-lg shadow-lg border-2 min-w-[50px] md:min-w-[60px] text-center ${isJB ? "bg-blue-500 scale-105" : ""}`}
-                  style={{
-                    backgroundColor: isJB ? "#baf5fe" : LIGHT_BLUE,
-                    borderColor: PRIMARY_BLUE,
-                  }}
+              <div className="mt-8 space-y-4">
+                <button
+                  onClick={startGame}
+                  className="w-full flex items-center justify-center gap-3 py-5 rounded-2xl text-white font-black text-xl hover:shadow-2xl hover:shadow-blue-500/20 active:scale-95 transition-all transform animate-pulse hover:animate-none"
+                  style={{ background: `linear-gradient(95deg, ${PRIMARY_BLUE}, ${LIGHT_BLUE})` }}
                 >
-                  <p className="text-xs text-white font-semibold">Tap</p>
-                  <p className="text-xl md:text-2xl font-bold text-white">
-                    {key}
-                  </p>
-                  <p className="text-xs text-white/80">{noteNames[index]}</p>
-                  {isJB && (
-                    <span className="block text-sm text-blue-900 font-bold mt-2">
-                      J / B big!
-                    </span>
-                  )}
+                  <Play className="w-6 h-6 fill-current" />
+                  START GAME
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+
+
+          {/* Setup controls */}
+          <div className="lg:col-span-7 space-y-6">
+            <div className="bg-white dark:bg-gray-900 border dark:border-gray-800 rounded-3xl p-6 md:p-8 shadow-xl space-y-6">
+              <h2 className="text-2xl font-black tracking-tight text-gray-800 dark:text-white border-b pb-4 dark:border-gray-800">
+                🔧 Exercise Configuration
+              </h2>
+
+              {/* 1. Platform selection */}
+              <div>
+                <label className="block text-sm font-black uppercase tracking-wider text-gray-400 mb-3">
+                  1. Select Device Platform
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <button
+                    onClick={() => {
+                      setPlatform('laptop');
+                    }}
+                    className={`flex items-center justify-center gap-3 py-4 rounded-2xl font-extrabold text-lg border-2 transition-all ${
+                      platform === 'laptop'
+                        ? 'border-blue-500 bg-blue-50/50 text-blue-600 dark:bg-blue-900/20 dark:border-blue-400 dark:text-blue-400 scale-[1.02] shadow-lg'
+                        : 'border-gray-200 text-gray-400 dark:border-gray-800 hover:border-gray-300 hover:text-gray-600 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    💻 Laptop / Desktop
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPlatform('mobile');
+                    }}
+                    className={`flex items-center justify-center gap-3 py-4 rounded-2xl font-extrabold text-lg border-2 transition-all ${
+                      platform === 'mobile'
+                        ? 'border-blue-500 bg-blue-50/50 text-blue-600 dark:bg-blue-900/20 dark:border-blue-400 dark:text-blue-400 scale-[1.02] shadow-lg'
+                        : 'border-gray-200 text-gray-400 dark:border-gray-800 hover:border-gray-300 hover:text-gray-600 dark:hover:text-gray-200'
+                    }`}
+                  >
+                    📱 Mobile Tablet / Phone
+                  </button>
                 </div>
-              );
-            })}
+              </div>
+
+              {/* 2. Exercise Selection */}
+              <div>
+                <label className="block text-sm font-black uppercase tracking-wider text-gray-400 mb-3">
+                  2. Select Therapy Exercise
+                </label>
+                {platform === 'mobile' ? (
+                  <div className="p-4 rounded-2xl bg-yellow-50/50 border border-yellow-200 text-yellow-800 dark:bg-yellow-950/20 dark:border-yellow-900/50 dark:text-yellow-400 text-sm font-semibold">
+                    ⌚ <strong>Wrist Movement Mode only:</strong> Mobile screen touch keys are locked to wrist tap coordinates tracking. Keyboard triggers are disabled.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <button
+                      onClick={() => setExerciseType('piano_finger')}
+                      className={`flex flex-col items-center p-4 rounded-2xl font-bold border-2 transition-all text-center ${
+                        exerciseType === 'piano_finger'
+                          ? 'border-blue-500 bg-blue-50/50 text-blue-600 dark:bg-blue-900/20 dark:border-blue-400 dark:text-blue-400 scale-[1.02] shadow-lg'
+                          : 'border-gray-200 text-gray-400 dark:border-gray-800 hover:border-gray-300'
+                      }`}
+                    >
+                      <span className="text-2xl mb-1">🖐️</span>
+                      <span className="text-base font-black">Finger Dexterity</span>
+                      <span className="text-xs font-normal mt-1 opacity-80">Keyboard Keys Layouts</span>
+                    </button>
+                    <button
+                      onClick={() => setExerciseType('piano_ankle')}
+                      className={`flex flex-col items-center p-4 rounded-2xl font-bold border-2 transition-all text-center ${
+                        exerciseType === 'piano_ankle'
+                          ? 'border-blue-500 bg-blue-50/50 text-blue-600 dark:bg-blue-900/20 dark:border-blue-400 dark:text-blue-400 scale-[1.02] shadow-lg'
+                          : 'border-gray-200 text-gray-400 dark:border-gray-800 hover:border-gray-300'
+                      }`}
+                    >
+                      <span className="text-2xl mb-1">⌚</span>
+                      <span className="text-base font-black">Wrist Movement</span>
+                      <span className="text-xs font-normal mt-1 opacity-80">Cursor Clicks Only (Continuous Wrist / Mouse Tracking)</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* 3. Keyboard layouts (Only Laptop + Finger Dexterity) */}
+              {platform === 'laptop' && exerciseType === 'piano_finger' && (
+                <div>
+                  <label className="block text-sm font-black uppercase tracking-wider text-gray-400 mb-3">
+                    3. Keyboard Hand Layout
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <button
+                      onClick={() => setKeyboardLayout('both')}
+                      className={`py-3 rounded-xl font-bold border transition-all text-xs md:text-sm ${
+                        keyboardLayout === 'both'
+                          ? 'bg-blue-500 border-blue-500 text-white shadow-md'
+                          : 'border-gray-200 text-gray-500 dark:border-gray-700 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      Both Hands
+                    </button>
+                    <button
+                      onClick={() => setKeyboardLayout('left')}
+                      className={`py-3 rounded-xl font-bold border transition-all text-xs md:text-sm ${
+                        keyboardLayout === 'left'
+                          ? 'bg-blue-500 border-blue-500 text-white shadow-md'
+                          : 'border-gray-200 text-gray-500 dark:border-gray-700 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      Left Hand (A, S, D, F)
+                    </button>
+                    <button
+                      onClick={() => setKeyboardLayout('right')}
+                      className={`py-3 rounded-xl font-bold border transition-all text-xs md:text-sm ${
+                        keyboardLayout === 'right'
+                          ? 'bg-blue-500 border-blue-500 text-white shadow-md'
+                          : 'border-gray-200 text-gray-500 dark:border-gray-700 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-850'
+                      }`}
+                    >
+                      Right Hand (H, J, K, L)
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 4. Keys count (Only Mobile) */}
+              {platform === 'mobile' && (
+                <div>
+                  <label className="block text-sm font-black uppercase tracking-wider text-gray-400 mb-3">
+                    3. Number of Mobile Taps/Keys
+                  </label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button
+                      onClick={() => setMobileKeysCount(4)}
+                      className={`py-3 rounded-xl font-bold border transition-all ${
+                        mobileKeysCount === 4
+                          ? 'bg-blue-500 border-blue-500 text-white shadow-md'
+                          : 'border-gray-200 text-gray-500 dark:border-gray-700 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      4 Keys (No Thumb)
+                    </button>
+                    <button
+                      onClick={() => setMobileKeysCount(5)}
+                      className={`py-3 rounded-xl font-bold border transition-all ${
+                        mobileKeysCount === 5
+                          ? 'bg-blue-500 border-blue-500 text-white shadow-md'
+                          : 'border-gray-200 text-gray-500 dark:border-gray-700 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
+                      }`}
+                    >
+                      5 Keys (With Thumb)
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* 5. Speed configuration */}
+              <div>
+                <label className="block text-sm font-black uppercase tracking-wider text-gray-400 mb-3">
+                  {platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')
+                    ? "4. Configure Individual Finger Speeds"
+                    : "3. Speed & Key Count Configuration"
+                  }
+                </label>
+
+                {/* Grid for finger speeds */}
+                {(platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) ? (
+                  <div className="space-y-4 bg-gray-50 dark:bg-gray-950 p-4 md:p-6 rounded-2xl border dark:border-gray-800">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 font-semibold mb-2">
+                      Adjust timeout (seconds) per finger independently. Left keys represent fingers sequentially.
+                    </p>
+                    
+                    {/* Render corresponding active finger sliders */}
+                    <div className="space-y-4">
+                      {platform === 'mobile' && (
+                        <>
+                          {mobileKeysCount === 5 && (
+                            <div className={`mt-2 transition-all ${disabledKeys.includes('A') ? 'opacity-50 grayscale' : ''}`}>
+                              <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 items-center">
+                                <div className="flex items-center gap-2">
+                                  <input type="checkbox" checked={!disabledKeys.includes('A')} onChange={() => toggleDisableKey('A')} className="w-5 h-5 accent-blue-500 cursor-pointer" />
+                                  <span className={disabledKeys.includes('A') ? 'line-through' : ''}>👍 Thumb (Key A)</span>
+                                </div>
+                                <span className="text-blue-500">{fingerTimeouts.thumb}s</span>
+                              </div>
+                              <input
+                                type="range" min="1" max="10" value={fingerTimeouts.thumb}
+                                onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, thumb: parseInt(e.target.value) })}
+                                disabled={disabledKeys.includes('A')}
+                                className={`w-full h-3 md:h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none ${disabledKeys.includes('A') ? 'cursor-not-allowed' : 'cursor-pointer accent-blue-500'}`}
+                              />
+                            </div>
+                          )}
+                          {[
+                            { id: 'index', label: '✍️ Index Finger', key: getFingerKeyLabel('index') },
+                            { id: 'middle', label: '🖐️ Middle Finger', key: getFingerKeyLabel('middle') },
+                            { id: 'ring', label: '💍 Ring Finger', key: getFingerKeyLabel('ring') },
+                            { id: 'pinky', label: '🤙 Pinky', key: getFingerKeyLabel('pinky') }
+                          ].map(f => (
+                            <div key={f.id} className={`mt-2 transition-all ${disabledKeys.includes(f.key) ? 'opacity-50 grayscale' : ''}`}>
+                              <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 items-center">
+                                <div className="flex items-center gap-2">
+                                  <input type="checkbox" checked={!disabledKeys.includes(f.key)} onChange={() => toggleDisableKey(f.key)} className="w-5 h-5 accent-blue-500 cursor-pointer" />
+                                  <span className={disabledKeys.includes(f.key) ? 'line-through' : ''}>{f.label} (Key {f.key})</span>
+                                </div>
+                                <span className="text-blue-500">{fingerTimeouts[f.id]}s</span>
+                              </div>
+                              <input
+                                type="range" min="1" max="10" value={fingerTimeouts[f.id]}
+                                onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, [f.id]: parseInt(e.target.value) })}
+                                disabled={disabledKeys.includes(f.key)}
+                                className={`w-full h-3 md:h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none ${disabledKeys.includes(f.key) ? 'cursor-not-allowed' : 'cursor-pointer accent-blue-500'}`}
+                              />
+                            </div>
+                          ))}
+                        </>
+                      )}
+
+                      {platform === 'laptop' && (
+                        <>
+                          {['both', 'left'].includes(keyboardLayout) && (
+                            <>
+                              <h4 className="text-sm font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2 border-b pb-1 dark:border-gray-800">Left Hand</h4>
+                              {[
+                                { id: 'leftPinky', label: '🤙 L Pinky', key: 'A' },
+                                { id: 'leftRing', label: '💍 L Ring', key: 'S' },
+                                { id: 'leftMiddle', label: '🖐️ L Middle', key: 'D' },
+                                { id: 'leftIndex', label: '✍️ L Index', key: 'F' }
+                              ].map(f => (
+                                <div key={f.id} className={`ml-2 mt-2 transition-all ${disabledKeys.includes(f.key) ? 'opacity-50 grayscale' : ''}`}>
+                                  <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 items-center">
+                                    <div className="flex items-center gap-2">
+                                      <input type="checkbox" checked={!disabledKeys.includes(f.key)} onChange={() => toggleDisableKey(f.key)} className="w-5 h-5 accent-blue-500 cursor-pointer" />
+                                      <span className={disabledKeys.includes(f.key) ? 'line-through' : ''}>{f.label} (Key {f.key})</span>
+                                    </div>
+                                    <span className="text-blue-500">{fingerTimeouts[f.id]}s</span>
+                                  </div>
+                                  <input
+                                    type="range" min="1" max="10" value={fingerTimeouts[f.id]}
+                                    onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, [f.id]: parseInt(e.target.value) })}
+                                    disabled={disabledKeys.includes(f.key)}
+                                    className={`w-full h-3 md:h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none ${disabledKeys.includes(f.key) ? 'cursor-not-allowed' : 'cursor-pointer accent-blue-500'}`}
+                                  />
+                                </div>
+                              ))}
+                            </>
+                          )}
+                          {['both', 'right'].includes(keyboardLayout) && (
+                            <>
+                              <h4 className="text-sm font-bold text-gray-800 dark:text-gray-200 mt-6 mb-2 border-b pb-1 dark:border-gray-800">Right Hand</h4>
+                              {[
+                                { id: 'rightIndex', label: '✍️ R Index', key: 'H' },
+                                { id: 'rightMiddle', label: '🖐️ R Middle', key: 'J' },
+                                { id: 'rightRing', label: '💍 R Ring', key: 'K' },
+                                { id: 'rightPinky', label: '🤙 R Pinky', key: 'L' }
+                              ].map(f => (
+                                <div key={f.id} className={`ml-2 mt-2 transition-all ${disabledKeys.includes(f.key) ? 'opacity-50 grayscale' : ''}`}>
+                                  <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 items-center">
+                                    <div className="flex items-center gap-2">
+                                      <input type="checkbox" checked={!disabledKeys.includes(f.key)} onChange={() => toggleDisableKey(f.key)} className="w-5 h-5 accent-blue-500 cursor-pointer" />
+                                      <span className={disabledKeys.includes(f.key) ? 'line-through' : ''}>{f.label} (Key {f.key})</span>
+                                    </div>
+                                    <span className="text-blue-500">{fingerTimeouts[f.id]}s</span>
+                                  </div>
+                                  <input
+                                    type="range" min="1" max="10" value={fingerTimeouts[f.id]}
+                                    onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, [f.id]: parseInt(e.target.value) })}
+                                    disabled={disabledKeys.includes(f.key)}
+                                    className={`w-full h-3 md:h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none ${disabledKeys.includes(f.key) ? 'cursor-not-allowed' : 'cursor-pointer accent-blue-500'}`}
+                                  />
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-6 bg-gray-50 dark:bg-gray-950 p-4 md:p-6 rounded-2xl border dark:border-gray-800">
+                    <div>
+                      <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                        <span>Overall Level Span:</span>
+                        <span className="text-blue-500 font-extrabold">{currentLevelSpan} seconds</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="10"
+                        value={currentLevelSpan}
+                        onChange={(e) => setCurrentLevelSpan(parseInt(e.target.value))}
+                        className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                      />
+                      <div className="flex justify-between text-[10px] text-gray-400 mt-1 font-semibold">
+                        <span>1s (Hardest)</span>
+                        <span>10s (Easiest)</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
+                        <span>Number of Piano Keys:</span>
+                        <span className="text-blue-500 font-extrabold">{currentNumSections} keys</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="2"
+                        max="9"
+                        value={currentNumSections}
+                        onChange={(e) => setCurrentNumSections(parseInt(e.target.value))}
+                        className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                      />
+                      <div className="flex justify-between text-[10px] text-gray-400 mt-1 font-semibold">
+                        <span>2 (Easy)</span>
+                        <span>9 (Hardest)</span>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={saveSettings}
+                      className="w-full py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-xl transition text-xs font-bold dark:bg-blue-950/40 dark:text-blue-400"
+                    >
+                      💾 Sync Key/Speed Config with Account Profile
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Current Session Data Preview */}
+        {/* Current session data preview */}
         {playData.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg p-4 md:p-6 border-t">
-            <h3 className="text-lg md:text-xl font-bold text-gray-800 mb-4">
-              Current Session Data
-            </h3>
+          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-lg p-6 border dark:border-gray-800">
+            <div className="flex items-center justify-between border-b pb-4 mb-4 dark:border-gray-800">
+              <h3 className="text-xl font-bold text-gray-800 dark:text-white">📊 Current Session Attempts</h3>
+              <div className="flex gap-4 text-sm font-semibold">
+                <span className="text-green-600">Correct: {correctCount}</span>
+                <span className="text-red-600">Incorrect: {incorrectCount}</span>
+                <span className="text-yellow-600">Not Done: {notDoneCount}</span>
+              </div>
+            </div>
             <div className="overflow-x-auto">
-              <table className="w-full text-xs md:text-sm">
+              <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b-2 border-gray-200">
-                    <th className="text-left py-2 px-3">Attempt</th>
-                    <th className="text-left py-2 px-3">Response Time</th>
-                    <th className="text-left py-2 px-3">Status</th>
+                  <tr className="border-b text-gray-400 text-left">
+                    <th className="pb-2">Attempt</th>
+                    <th className="pb-2">Response Time</th>
+                    <th className="pb-2">Outcome</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {playData.slice(-10).map((entry, index) => (
-                    <tr key={index} className="border-b border-gray-100">
-                      <td className="py-2 px-3">
-                        #
-                        {playData.length -
-                          playData.slice(-10).length +
-                          index +
-                          1}
+                  {playData.slice(-10).map((entry, idx) => (
+                    <tr key={idx} className="border-b last:border-0 dark:border-gray-850">
+                      <td className="py-2 font-mono">#{idx + 1}</td>
+                      <td className="py-2 font-semibold">
+                        {entry.responsetime === -1 ? 'Timed Out' : `${entry.responsetime}s`}
                       </td>
-                      <td className="py-2 px-3">
-                        <span
-                          className={`font-semibold ${entry.responsetime === -1 ? "text-yellow-600" : PRIMARY_BLUE}`}
-                        >
-                          {entry.responsetime === -1
-                            ? "Exceeded"
-                            : `${entry.responsetime}s`}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3">
-                        {entry.correct === 1 && (
-                          <span
-                            className="px-2 py-1 bg-green-100 rounded font-semibold"
-                            style={{ color: "green" }}
-                          >
-                            ✓ Correct
-                          </span>
-                        )}
-                        {entry.correct === -1 && (
-                          <span
-                            className="px-2 py-1 bg-red-100 rounded font-semibold"
-                            style={{ color: "red" }}
-                          >
-                            ✗ Incorrect
-                          </span>
-                        )}
-                        {entry.correct === 0 && (
-                          <span
-                            className="px-2 py-1 bg-yellow-100 rounded font-semibold"
-                            style={{ color: "#CCB000" }}
-                          >
-                            ⊘ Not Done
-                          </span>
+                      <td className="py-2">
+                        {entry.correct === 1 ? (
+                          <span className="px-2 py-0.5 bg-green-100 text-green-700 dark:bg-green-950/30 dark:text-green-400 rounded text-xs font-bold">✓ CORRECT</span>
+                        ) : entry.correct === -1 ? (
+                          <span className="px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-950/30 dark:text-red-400 rounded text-xs font-bold">✗ INCORRECT</span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 dark:bg-yellow-950/30 dark:text-yellow-400 rounded text-xs font-bold">⊘ NOT DONE</span>
                         )}
                       </td>
                     </tr>
@@ -1090,105 +1712,9 @@ const PianoReactionGame = () => {
                 </tbody>
               </table>
             </div>
-            {playData.length > 10 && (
-              <p className="text-xs md:text-sm text-gray-500 mt-2 text-center">
-                Showing last 10 of {playData.length} attempts
-              </p>
-            )}
           </div>
         )}
 
-        {/* Settings Modal */}
-        {showSettings && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-            <div className="bg-white dark:bg-gray-900 rounded-xl p-4 md:p-6 max-w-md w-full shadow-2xl border dark:border-gray-800">
-              <h3 className="text-xl md:text-2xl font-bold text-gray-800 mb-6">
-                Game Settings
-              </h3>
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">
-                    Level Span (seconds):{" "}
-                    <span
-                      className="text-xl md:text-2xl"
-                      style={{ color: PRIMARY_BLUE }}
-                    >
-                      {tempLevelSpan}
-                    </span>
-                  </label>
-                  <input
-                    type="range"
-                    min="1"
-                    max="10"
-                    step="1"
-                    value={tempLevelSpan}
-                    onChange={(e) => setTempLevelSpan(parseInt(e.target.value))}
-                    className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                    style={{ accentColor: PRIMARY_BLUE }}
-                  />
-                  <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>1s (Harder)</span>
-                    <span>10s (Easier)</span>
-                  </div>
-                  <p className="text-sm text-gray-600 mt-3">
-                    This is how many seconds you'll have to respond to each key.
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-3">
-                    Number of Keys:{" "}
-                    <span
-                      className="text-xl md:text-2xl"
-                      style={{ color: PRIMARY_BLUE }}
-                    >
-                      {tempNumSections}
-                    </span>
-                  </label>
-                  <input
-                    type="range"
-                    min="2"
-                    max="9"
-                    step="1"
-                    value={tempNumSections}
-                    onChange={(e) =>
-                      setTempNumSections(parseInt(e.target.value))
-                    }
-                    className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                    style={{ accentColor: PRIMARY_BLUE }}
-                  />
-                  <div className="flex justify-between text-xs text-gray-500 mt-1">
-                    <span>2 (Easier)</span>
-                    <span>9 (Harder)</span>
-                  </div>
-                  <p className="text-sm text-gray-600 mt-3">
-                    Number of piano keys to use (A= C, S= D, etc.).
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3 mt-8">
-                <button
-                  onClick={saveSettings}
-                  className="flex-1 text-white py-3 rounded-lg font-semibold hover:shadow-lg transition shadow-md"
-                  style={{
-                    background: `linear-gradient(90deg, ${PRIMARY_BLUE}, ${LIGHT_BLUE})`,
-                  }}
-                >
-                  💾 Save Settings
-                </button>
-                <button
-                  onClick={() => {
-                    setTempLevelSpan(currentLevelSpan);
-                    setTempNumSections(currentNumSections);
-                    setShowSettings(false);
-                  }}
-                  className="flex-1 bg-gray-200 text-gray-800 py-3 rounded-lg font-semibold hover:bg-gray-300 transition"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
       <SaveExitButton onBeforeSave={handleBeforeSave} />
     </div>

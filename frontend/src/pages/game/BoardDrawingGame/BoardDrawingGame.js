@@ -5,18 +5,35 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import gameSessionBuffer from "../../../services/gameSessionBuffer";
 import SaveExitButton from "../SaveExitButton";
+import {
+  COORD_SAMPLE_INTERVAL_MS,
+  MAX_COORDS_PER_SESSION,
+  DEFAULT_SESSION_SECONDS,
+  BOARD_DRAWING_CALIBRATION_SECONDS,
+  BOARD_DRAWING_NUM_SHAPE_POINTS,
+  BOARD_DRAWING_PICK_DISTANCE,
+  BOARD_DRAWING_TRACE_TOLERANCE,
+  BOARD_DRAWING_SCORE_PER_SHAPE,
+  BOARD_DRAWING_MIN_COMPLETION,
+  BOARD_DRAWING_SMOOTH_ALPHA,
+  BOARD_DRAWING_STABLE_FRAMES,
+  BOARD_DRAWING_DRAW_FPS,
+  BOARD_DRAWING_DEFAULT_SAFE_ZONE_RADIUS,
+  BOARD_DRAWING_DEFAULT_WARNING_ZONE_RADIUS,
+} from "../../../constants";
+import * as GameStorage from "./gameStorage";
 // ==================== CONFIGURATION ====================
 const CONFIG = {
-  SESSION_SECONDS: 300,
-  CALIBRATION_SECONDS: 7,
-  NUM_SHAPE_POINTS: 20,
-  PICK_DISTANCE: 0.08,
-  TRACE_TOLERANCE: 0.05,
-  SCORE_PER_SHAPE: 10,
-  MIN_COMPLETION: 0.8, // 80% points hit for success
-  SMOOTH_ALPHA: 0.7,
-  STABLE_FRAMES: 2,
-  DRAW_FPS: 30,
+  SESSION_SECONDS: DEFAULT_SESSION_SECONDS,
+  CALIBRATION_SECONDS: BOARD_DRAWING_CALIBRATION_SECONDS,
+  NUM_SHAPE_POINTS: BOARD_DRAWING_NUM_SHAPE_POINTS,
+  PICK_DISTANCE: BOARD_DRAWING_PICK_DISTANCE,
+  TRACE_TOLERANCE: BOARD_DRAWING_TRACE_TOLERANCE,
+  SCORE_PER_SHAPE: BOARD_DRAWING_SCORE_PER_SHAPE,
+  MIN_COMPLETION: BOARD_DRAWING_MIN_COMPLETION,
+  SMOOTH_ALPHA: BOARD_DRAWING_SMOOTH_ALPHA,
+  STABLE_FRAMES: BOARD_DRAWING_STABLE_FRAMES,
+  DRAW_FPS: BOARD_DRAWING_DRAW_FPS,
 };
 
 // ==================== SHAPE GENERATION ====================
@@ -30,6 +47,18 @@ const SHAPES = [
   "heart",
   "diamond",
 ];
+
+const SHAPE_COMPLEXITY_MULTIPLIERS = {
+  circle: 1.0,
+  ellipse: 1.2,
+  triangle: 1.2,
+  square: 1.2,
+  diamond: 1.3,
+  hexagon: 1.5,
+  heart: 2.0,
+  star: 2.5,
+};
+
 
 const clamp = (val, min, max) => Math.max(min, Math.min(max, val));
 
@@ -135,6 +164,33 @@ const generateShapePoints = (type, numPoints = CONFIG.NUM_SHAPE_POINTS) => {
   return points;
 };
 
+const distNorm = (a, b) => {
+  if (!a || !b) return 999;
+  return Math.hypot(a.x - b.x, a.y - b.y);
+};
+
+const getMinDistanceToShapeOutline = (pos, points) => {
+  if (!points || points.length < 2) return 999;
+  let minDistance = 999;
+  for (let i = 0; i < points.length; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+    const l2 = distNorm(p1, p2) ** 2;
+    if (l2 === 0) {
+      minDistance = Math.min(minDistance, distNorm(pos, p1));
+      continue;
+    }
+    let t = ((pos.x - p1.x) * (p2.x - p1.x) + (pos.y - p1.y) * (p2.y - p1.y)) / l2;
+    t = Math.max(0, Math.min(1, t));
+    const projection = {
+      x: p1.x + t * (p2.x - p1.x),
+      y: p1.y + t * (p2.y - p1.y),
+    };
+    minDistance = Math.min(minDistance, distNorm(pos, projection));
+  }
+  return minDistance;
+};
+
 // ==================== MAIN COMPONENT ====================
 const BoardDrawingGame = () => {
   const { isDarkMode } = useAuth();
@@ -157,6 +213,19 @@ const BoardDrawingGame = () => {
   const [timeRemaining, setTimeRemaining] = useState(300);
   const [successRate, setSuccessRate] = useState(0);
 
+  const [handPoseMode, setHandPoseModeState] = useState("strict");
+  const handPoseModeRef = useRef("strict");
+  const toggleHandPoseMode = () => {
+    const newMode = handPoseMode === "strict" ? "any" : "strict";
+    setHandPoseModeState(newMode);
+    handPoseModeRef.current = newMode;
+  };
+
+  const [safeZoneRadius, setSafeZoneRadius] = useState(BOARD_DRAWING_DEFAULT_SAFE_ZONE_RADIUS);
+  const safeZoneRadiusRef = useRef(BOARD_DRAWING_DEFAULT_SAFE_ZONE_RADIUS);
+  const [warningZoneRadius, setWarningZoneRadius] = useState(BOARD_DRAWING_DEFAULT_WARNING_ZONE_RADIUS);
+  const warningZoneRadiusRef = useRef(BOARD_DRAWING_DEFAULT_WARNING_ZONE_RADIUS);
+
   // Hand State
   const [leftHandVisible, setLeftHandVisible] = useState(false);
   const [rightHandVisible, setRightHandVisible] = useState(false);
@@ -164,6 +233,10 @@ const BoardDrawingGame = () => {
   const [rightHandClosed, setRightHandClosed] = useState(false);
   // eslint-disable-next-line no-unused-vars
   const [debugInfo, setDebugInfo] = useState("");
+  const [showAnalyticsBtn, setShowAnalyticsBtn] = useState(false);
+
+  // Local storage game id ref
+  const localGameIdRef = useRef(null);
 
   // Refs
   const videoRef = useRef(null);
@@ -183,6 +256,13 @@ const BoardDrawingGame = () => {
   const isInitializedRef = useRef(isInitialized);
   const usingMouseFallbackRef = useRef(usingMouseFallback);
   const showDebugRef = useRef(showDebug);
+  const coordinateLogRef = useRef([]);
+  const lastCoordTimeRef = useRef(0);
+  const boardDrawingAttemptsRef = useRef([]);
+  const activeAttemptStartedAtRef = useRef(null);
+  const animationFrameRef = useRef(null);
+  const isUnmountingRef = useRef(false);
+  const mouseStateRef = useRef({ isDown: false, x: 0, y: 0 });
 
   // Game State Refs
   const handStateRef = useRef({
@@ -226,13 +306,10 @@ const BoardDrawingGame = () => {
   const shapeRef = useRef(null);
   const currentTargetIdxRef = useRef(0);
   const drawnPathRef = useRef([]);
+  const gestureResetRequiredRef = useRef(false);
   const lastPoseResultsRef = useRef(null);
 
   // ==================== UTILITY FUNCTIONS ====================
-  const distNorm = (a, b) => {
-    if (!a || !b) return 999;
-    return Math.hypot(a.x - b.x, a.y - b.y);
-  };
   const smoothPos = (prev, next) => {
     if (!prev) return { x: next.x, y: next.y };
     return {
@@ -240,11 +317,11 @@ const BoardDrawingGame = () => {
       y: prev.y * (1 - CONFIG.SMOOTH_ALPHA) + next.y * CONFIG.SMOOTH_ALPHA,
     };
   };
-  const nowSec = () => {
+  const nowSec = useCallback(() => {
     return sessionStartRef.current
       ? Math.floor((Date.now() - sessionStartRef.current) / 1000)
       : 0;
-  };
+  }, []);
   const formatTime = (sec) => {
     const m = String(Math.floor(sec / 60)).padStart(2, "0");
     const s = String(sec % 60).padStart(2, "0");
@@ -254,17 +331,226 @@ const BoardDrawingGame = () => {
     setStatusMessage({ text: msg, visible: true });
     setTimeout(() => setStatusMessage({ text: "", visible: false }), duration);
   };
+  const getGameCanvasDimensions = useCallback(() => {
+    const canvas = gameCanvasRef.current;
+    return {
+      width: canvas?.width || canvas?.clientWidth || 0,
+      height: canvas?.height || canvas?.clientHeight || 0,
+    };
+  }, []);
+  const makeTracePoint = useCallback((point, zone = "safe", color = "#51cf66") => {
+    const canvas = getGameCanvasDimensions();
+    const handState = handStateRef.current;
+    const pose = lastPoseResultsRef.current;
+
+    let leftShoulder = null;
+    let rightShoulder = null;
+    let leftElbow = null;
+    let rightElbow = null;
+    let leftWrist = null;
+    let rightWrist = null;
+
+    if (pose && pose.poseLandmarks) {
+      const pl = pose.poseLandmarks;
+      if (pl[11] && pl[11].visibility > 0.5) leftShoulder = { x: pl[11].x, y: pl[11].y };
+      if (pl[12] && pl[12].visibility > 0.5) rightShoulder = { x: pl[12].x, y: pl[12].y };
+      if (pl[13] && pl[13].visibility > 0.5) leftElbow = { x: pl[13].x, y: pl[13].y };
+      if (pl[14] && pl[14].visibility > 0.5) rightElbow = { x: pl[14].x, y: pl[14].y };
+      if (pl[15] && pl[15].visibility > 0.5) leftWrist = { x: pl[15].x, y: pl[15].y };
+      if (pl[16] && pl[16].visibility > 0.5) rightWrist = { x: pl[16].x, y: pl[16].y };
+    }
+
+    if (handState.Left.landmarks && handState.Left.landmarks[0]) {
+      leftWrist = { x: handState.Left.landmarks[0].x, y: handState.Left.landmarks[0].y };
+    }
+    if (handState.Right.landmarks && handState.Right.landmarks[0]) {
+      rightWrist = { x: handState.Right.landmarks[0].x, y: handState.Right.landmarks[0].y };
+    }
+
+    return {
+      x: point.x,
+      y: point.y,
+      screenX: canvas.width ? point.x * canvas.width : undefined,
+      screenY: canvas.height ? point.y * canvas.height : undefined,
+      timestamp: nowSec(),
+      zone,
+      color,
+      leftShoulder,
+      rightShoulder,
+      leftElbow,
+      rightElbow,
+      leftWrist,
+      rightWrist,
+      palm: { x: point.x, y: point.y }
+    };
+  }, [getGameCanvasDimensions, nowSec]);
+  const copyPoint = (point) => ({
+    x: point.x,
+    y: point.y,
+    screenX: point.screenX,
+    screenY: point.screenY,
+    timestamp: point.timestamp,
+    zone: point.zone,
+    color: point.color,
+    leftShoulder: point.leftShoulder ? { x: point.leftShoulder.x, y: point.leftShoulder.y } : null,
+    rightShoulder: point.rightShoulder ? { x: point.rightShoulder.x, y: point.rightShoulder.y } : null,
+    leftElbow: point.leftElbow ? { x: point.leftElbow.x, y: point.leftElbow.y } : null,
+    rightElbow: point.rightElbow ? { x: point.rightElbow.x, y: point.rightElbow.y } : null,
+    leftWrist: point.leftWrist ? { x: point.leftWrist.x, y: point.leftWrist.y } : null,
+    rightWrist: point.rightWrist ? { x: point.rightWrist.x, y: point.rightWrist.y } : null,
+    palm: point.palm ? { x: point.palm.x, y: point.palm.y } : null
+  });
+  const buildBoardDrawingAttempt = useCallback(({
+    shape,
+    hand,
+    hits,
+    total,
+    completion,
+    success,
+    scoreAfter,
+    traceQuality,
+    pointsEarned,
+    safeZoneRadius,
+    warningZoneRadius,
+  }) => {
+    const canvas = getGameCanvasDimensions();
+    const closePath = (points) => {
+      const copied = points.map((point) => ({
+        x: point.x,
+        y: point.y,
+        screenX: canvas.width ? point.x * canvas.width : undefined,
+        screenY: canvas.height ? point.y * canvas.height : undefined,
+      }));
+      if (copied.length > 0) copied.push({ ...copied[0] });
+      return copied;
+    };
+    const drawnPath = drawnPathRef.current.map(copyPoint);
+    const targetPath = closePath(shape.points);
+    return {
+      attemptNumber: attemptsRef.current + 1,
+      requestedShape: shape.type,
+      shapeType: shape.type,
+      hand,
+      startedAt: activeAttemptStartedAtRef.current,
+      endedAt: nowSec(),
+      canvasWidth: canvas.width,
+      canvasHeight: canvas.height,
+      targetPath,
+      drawnPath,
+      pathMatrix: drawnPath.map((point) => [
+        point.screenX ?? point.x,
+        point.screenY ?? point.y,
+        point.timestamp ?? 0,
+      ]),
+      hits,
+      total,
+      completion,
+      success,
+      scoreAfter,
+      traceQuality,
+      pointsEarned,
+      safeZoneRadius,
+      warningZoneRadius,
+    };
+  }, [getGameCanvasDimensions, nowSec]);
+  const safeCloseModule = useCallback((moduleRef, moduleName) => {
+    if (!moduleRef.current) return;
+    try {
+      moduleRef.current.close();
+    } catch (error) {
+      const errMsg = error ? (error.message || String(error)) : "";
+      if (!errMsg.includes("already deleted")) {
+        console.warn(`Failed to close ${moduleName}:`, error);
+      }
+    } finally {
+      moduleRef.current = null;
+    }
+  }, []);
+  const buildBufferedSessionData = useCallback(() => {
+    const playData = logsRef.current.map((log) => {
+      const {
+        event,
+        score: eventScore,
+        hand,
+        timestamp,
+        shape_type,
+        ...metaFields
+      } = log;
+      const meta = Object.fromEntries(
+        Object.entries(metaFields).filter(([, value]) => value !== undefined),
+      );
+      const entry = {
+        eventName: event,
+        score: eventScore,
+        hand,
+        responsetime: timestamp,
+        shapeType: shape_type,
+      };
+      if (Object.keys(meta).length > 0) {
+        entry.meta = meta;
+      }
+      return entry;
+    });
+    return {
+      sessionScore: scoreRef.current,
+      playData,
+      coordinates: coordinateLogRef.current.map((point) => ({ ...point })),
+      boardDrawingAttempts: boardDrawingAttemptsRef.current.map((attempt) => ({
+        ...attempt,
+        targetPath: attempt.targetPath?.map((point) => ({ ...point })) || [],
+        drawnPath: attempt.drawnPath?.map((point) => ({ ...point })) || [],
+        pathMatrix: attempt.pathMatrix?.map((row) => [...row]) || [],
+      })),
+    };
+  }, []);
+  const persistBoardDrawingBuffer = useCallback(() => {
+    gameSessionBuffer.update(buildBufferedSessionData());
+    // Also persist latest attempt to local storage
+    if (localGameIdRef.current && boardDrawingAttemptsRef.current.length > 0) {
+      const latest = boardDrawingAttemptsRef.current[boardDrawingAttemptsRef.current.length - 1];
+      GameStorage.recordTry(localGameIdRef.current, latest);
+    }
+  }, [buildBufferedSessionData]);
+  const finalizeActiveDrawingAttempt = useCallback(() => {
+    const shape = shapeRef.current;
+    if (!shape?.drawingHand || drawnPathRef.current.length < 2) return false;
+
+    const hits = currentTargetIdxRef.current;
+    const total = shape.points.length;
+    const completion = total > 0 ? hits / total : 0;
+    boardDrawingAttemptsRef.current.push(
+      buildBoardDrawingAttempt({
+        shape,
+        hand: shape.drawingHand,
+        hits,
+        total,
+        completion,
+        success: completion >= CONFIG.MIN_COMPLETION,
+        scoreAfter: scoreRef.current,
+      }),
+    );
+    logsRef.current.push({
+      timestamp: nowSec(),
+      event: "drawing_interrupted",
+      shape_type: shape.type,
+      hand: shape.drawingHand,
+      hits,
+      total,
+      completion,
+    });
+    shape.drawingHand = null;
+    activeAttemptStartedAtRef.current = null;
+    attemptsRef.current++;
+    persistBoardDrawingBuffer();
+    return true;
+  }, [buildBoardDrawingAttempt, nowSec, persistBoardDrawingBuffer]);
 
   // ==================== SPAWN SHAPE ====================
   const pickNewShape = useCallback(() => {
     // Determine shape by level
     const level = calibrationRef.current.level || 1;
-    let shapeType;
-    if (level <= SHAPES.length) {
-      shapeType = SHAPES[level - 1];
-    } else {
-      shapeType = SHAPES[Math.floor(Math.random() * SHAPES.length)];
-    }
+    // Just pick a random shape every time to show variety
+    const shapeType = SHAPES[Math.floor(Math.random() * SHAPES.length)];
 
     const points = generateShapePoints(shapeType);
     shapeRef.current = {
@@ -294,20 +580,31 @@ const BoardDrawingGame = () => {
       num_points: shapeRef.current.points.length,
       score: scoreRef.current,
     });
-  }, [pickNewShape]);
+    // Keep local storage bgCoordinates in sync with current shape
+    if (localGameIdRef.current) {
+      GameStorage.updateBgCoordinates(localGameIdRef.current, shapeRef.current.points);
+    }
+  }, [pickNewShape, nowSec]);
 
   // ==================== MEDIAPIPE HANDLERS ====================
   const onHandsResults = useCallback((results) => {
     const handState = handStateRef.current;
 
     handState.Left.visible = false;
-    handState.Right.visible = false;
+    if (!mouseStateRef.current.isDown) {
+      handState.Right.visible = false;
+      handState.Right.landmarks = null;
+    }
     handState.Left.landmarks = null;
-    handState.Right.landmarks = null;
+
     if (results.multiHandLandmarks && results.multiHandedness) {
       for (let i = 0; i < results.multiHandLandmarks.length; i++) {
         const lm = results.multiHandLandmarks[i];
         const label = results.multiHandedness[i].label;
+
+        if (label === "Right" && mouseStateRef.current.isDown) {
+          continue;
+        }
 
         const palmCenter = {
           x: (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5,
@@ -481,9 +778,19 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       cameraRef.current = new Camera(videoRef.current, {
         onFrame: async () => {
           if (!videoRef.current) return;
+          if (isUnmountingRef.current) return;
           if (!usingMouseFallbackRef.current && isInitializedRef.current) {
-            await handsModuleRef.current.send({ image: videoRef.current });
-            await poseModuleRef.current.send({ image: videoRef.current });
+            const handsModule = handsModuleRef.current;
+            const poseModule = poseModuleRef.current;
+            if (!handsModule || !poseModule) return;
+            try {
+              await handsModule.send({ image: videoRef.current });
+              await poseModule.send({ image: videoRef.current });
+            } catch (error) {
+              if (!String(error?.message || "").includes("already deleted")) {
+                console.warn("MediaPipe frame processing error:", error);
+              }
+            }
           }
         },
         width: 640,
@@ -508,18 +815,48 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     const shape = shapeRef.current;
     ["Left", "Right"].forEach((label) => {
       const hand = handState[label];
-      if (!hand.smoothPos || !hand.visible) return;
-      const pos = hand.smoothPos;
       const isDrawing = shape.drawingHand === label;
+      if (!hand.smoothPos || (!hand.visible && !isDrawing)) return;
+      const pos = hand.smoothPos;
+      const isDrawingTriggered = handPoseModeRef.current === "any" 
+        ? hand.visible 
+        : (hand.visible && hand.closed);
+
+      if (!isDrawingTriggered) {
+        gestureResetRequiredRef.current = false;
+      }
+      if (gestureResetRequiredRef.current) {
+        if (distNorm(pos, shape.points[0]) >= CONFIG.TRACE_TOLERANCE) {
+          gestureResetRequiredRef.current = false;
+        }
+      }
+      if (gestureResetRequiredRef.current) return;
+      
+      // Track downsampled coordinates for relative hand trajectory visualization
+      if (sessionStartRef.current && Date.now() - lastCoordTimeRef.current > COORD_SAMPLE_INTERVAL_MS) {
+        if (coordinateLogRef.current.length < MAX_COORDS_PER_SESSION) {
+          coordinateLogRef.current.push({
+            x: pos.x,
+            y: pos.y,
+            timestamp: nowSec()
+          });
+        }
+        lastCoordTimeRef.current = Date.now();
+      }
+
       if (
         !shape.drawingHand &&
-        hand.closed &&
-        currentTargetIdxRef.current === 0
+        isDrawingTriggered &&
+        drawnPathRef.current.length === 0
       ) {
-        if (distNorm(pos, shape.points[0]) < CONFIG.PICK_DISTANCE) {
+        // Only start drawing if the hand is near the FIRST point
+        if (distNorm(pos, shape.points[0]) < CONFIG.TRACE_TOLERANCE) {
           shape.drawingHand = label;
-          drawnPathRef.current = [{ ...pos }];
+          activeAttemptStartedAtRef.current = nowSec();
+          const startPoint = makeTracePoint(pos, "safe", "#51cf66");
+          drawnPathRef.current = [startPoint];
           currentTargetIdxRef.current = 1;
+          
           logsRef.current.push({
             timestamp: nowSec(),
             event: "start_drawing",
@@ -532,8 +869,21 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           );
         }
       } else if (isDrawing) {
-        if (hand.closed) {
-          drawnPathRef.current.push({ ...pos });
+        const autoComplete = (handPoseModeRef.current === "any" && currentTargetIdxRef.current >= shape.points.length);
+        
+        if (isDrawingTriggered && !autoComplete) {
+          const distToOutline = getMinDistanceToShapeOutline(pos, shape.points);
+          let zone = "safe";
+          let color = "#51cf66";
+          if (distToOutline >= warningZoneRadiusRef.current) {
+            zone = "danger";
+            color = "#ff6b6b";
+          } else if (distToOutline >= safeZoneRadiusRef.current) {
+            zone = "warning";
+            color = "#fcc419";
+          }
+          const tracedPoint = makeTracePoint(pos, zone, color);
+          drawnPathRef.current.push(tracedPoint);
           // Advance targets if close
           while (
             currentTargetIdxRef.current < shape.points.length &&
@@ -543,17 +893,40 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             currentTargetIdxRef.current++;
           }
           if (currentTargetIdxRef.current >= shape.points.length) {
-            showStatus(
-              "All points reached! Open hand to complete the shape.",
-              1000,
-            );
+            if (handPoseModeRef.current === "any") {
+              // Will be auto-completed immediately below
+            } else {
+              showStatus(
+                "All points reached! Open hand to complete the shape.",
+                1000,
+              );
+            }
           }
-        } else {
-          // Open hand - end drawing
+        }
+        
+        const shouldEndDrawing = !isDrawingTriggered || autoComplete;
+
+        if (shouldEndDrawing) {
+          // Open hand - end drawing (or auto-completed)
           shape.drawingHand = null;
           const hits = currentTargetIdxRef.current;
           const total = shape.points.length;
           const completion = hits / total;
+
+          const path = drawnPathRef.current;
+          const safeCount = path.filter(p => p.zone === 'safe').length;
+          const warningCount = path.filter(p => p.zone === 'warning').length;
+          const dangerCount = path.filter(p => p.zone === 'danger').length;
+          const totalPoints = path.length;
+          const traceQuality = totalPoints > 0 ? Math.round(((safeCount * 1.0 + warningCount * 0.5 + dangerCount * 0.1) / totalPoints) * 100) : 100;
+
+          // Partial Scoring Algorithm with Complexity Multiplier and Quality Degrader
+          const multiplier = SHAPE_COMPLEXITY_MULTIPLIERS[shape.type] || 1;
+          const pointsEarned = Math.round(hits * (1 + (hits / total)) * multiplier * (traceQuality / 100));
+          const newScore = scoreRef.current + pointsEarned;
+          setScore(newScore);
+          scoreRef.current = newScore;
+
           logsRef.current.push({
             timestamp: nowSec(),
             event: "end_drawing",
@@ -567,9 +940,6 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
             // Shape Success!
             const newReps = reps + 1;
             setReps(newReps);
-            const newScore = scoreRef.current + CONFIG.SCORE_PER_SHAPE;
-            setScore(newScore);
-            scoreRef.current = newScore;
             successesRef.current++;
 
             // Advance level every 3 shapes
@@ -578,7 +948,23 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
                 (calibrationRef.current.level || 1) + 1;
             }
 
-            pickNewShape();
+            boardDrawingAttemptsRef.current.push(
+              buildBoardDrawingAttempt({
+                shape,
+                hand: label,
+                hits,
+                total,
+                completion,
+                success: true,
+                scoreAfter: newScore,
+                traceQuality,
+                pointsEarned,
+                safeZoneRadius: safeZoneRadiusRef.current,
+                warningZoneRadius: warningZoneRadiusRef.current,
+              }),
+            );
+            persistBoardDrawingBuffer();
+            activeAttemptStartedAtRef.current = null;
             attemptsRef.current++;
             logsRef.current.push({
               timestamp: nowSec(),
@@ -594,12 +980,31 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
               100
             ).toFixed(0);
             setSuccessRate(newRate);
+            const multText = multiplier > 1 ? ` (${multiplier}x complexity)` : "";
             showStatus(
-              `✅ Shape completed! ${Math.round(completion * 100)}% accuracy +${CONFIG.SCORE_PER_SHAPE} points`,
+              `✅ Shape completed! ${Math.round(completion * 100)}% accuracy (Quality: ${traceQuality}%) +${pointsEarned} points${multText}`,
               2000,
             );
+            gestureResetRequiredRef.current = true;
             spawnShape();
           } else {
+            boardDrawingAttemptsRef.current.push(
+              buildBoardDrawingAttempt({
+                shape,
+                hand: label,
+                hits,
+                total,
+                completion,
+                success: false,
+                scoreAfter: newScore,
+                traceQuality,
+                pointsEarned,
+                safeZoneRadius: safeZoneRadiusRef.current,
+                warningZoneRadius: warningZoneRadiusRef.current,
+              }),
+            );
+            persistBoardDrawingBuffer();
+            activeAttemptStartedAtRef.current = null;
             attemptsRef.current++;
             logsRef.current.push({
               timestamp: nowSec(),
@@ -615,8 +1020,9 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
               100
             ).toFixed(0);
             setSuccessRate(newRate);
+            const retryAction = handPoseModeRef.current === "any" ? "Hover starting point to retry." : "Close hand to retry.";
             showStatus(
-              `⚠️ Incomplete trace: ${Math.round(completion * 100)}% - Close hand near start to retry.`,
+              `⚠️ Partial trace: ${Math.round(completion * 100)}% (Quality: ${traceQuality}%) (+${pointsEarned} pts) - ${retryAction}`,
               2000,
             );
             currentTargetIdxRef.current = 0;
@@ -625,7 +1031,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         }
       }
     });
-  }, [spawnShape, pickNewShape, reps]);
+  }, [spawnShape, reps, nowSec, buildBoardDrawingAttempt, persistBoardDrawingBuffer, makeTracePoint]);
 
   // ==================== DRAWING ====================
   const drawOverlay = useCallback(() => {
@@ -658,9 +1064,10 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       const hand = handState[label];
       if (!hand.landmarks || !hand.visible) return;
       const lm = hand.landmarks;
-      const color = hand.closed
-        ? "rgba(220, 50, 50, 0.9)"
-        : "rgba(50, 200, 80, 0.9)";
+      const canDraw = handPoseModeRef.current === "any" ? true : hand.closed;
+      const color = canDraw
+        ? "rgba(50, 200, 80, 0.9)" // green for can draw
+        : "rgba(220, 50, 50, 0.9)"; // red for cannot draw
 
       const palmCenter = {
         x: (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5,
@@ -729,7 +1136,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       const pcy = palmCenter.y * h;
       ctx.beginPath();
       ctx.arc(pcx, pcy, 16, 0, Math.PI * 2);
-      ctx.strokeStyle = hand.closed ? "#ff6b6b" : "#51cf66";
+      ctx.strokeStyle = color;
       ctx.lineWidth = 3;
       ctx.stroke();
 
@@ -742,13 +1149,13 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
       ctx.beginPath();
       ctx.arc(pcx, pcy, 4, 0, Math.PI * 2);
-      ctx.fillStyle = hand.closed ? "#ff6b6b" : "#51cf66";
+      ctx.fillStyle = color;
       ctx.fill();
-      const stateText = hand.closed ? "CLOSED" : "OPEN";
+      const stateText = canDraw ? "CAN DRAW" : "CANNOT DRAW";
       ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
-      ctx.fillRect(pcx + 20, pcy - 16, 120, 26);
+      ctx.fillRect(pcx + 20, pcy - 16, 140, 26);
 
-      ctx.fillStyle = hand.closed ? "#ff6b6b" : "#51cf66";
+      ctx.fillStyle = color;
       ctx.font = "bold 14px Arial";
       ctx.fillText(`${label} ${stateText}`, pcx + 26, pcy);
     });
@@ -765,6 +1172,29 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     const scale = window.devicePixelRatio || 1;
     if (shapeRef.current) {
       const shape = shapeRef.current;
+      
+      // Draw warning zone buffer halo
+      ctx.strokeStyle = isDarkMode ? "rgba(252, 196, 25, 0.15)" : "rgba(252, 196, 25, 0.2)";
+      ctx.lineWidth = warningZoneRadiusRef.current * 2 * w; // dynamic double warning radius
+      ctx.beginPath();
+      ctx.moveTo(shape.points[0].x * w, shape.points[0].y * h);
+      for (let i = 1; i < shape.points.length; i++) {
+        ctx.lineTo(shape.points[i].x * w, shape.points[i].y * h);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      // Draw safe zone buffer halo
+      ctx.strokeStyle = isDarkMode ? "rgba(81, 207, 102, 0.2)" : "rgba(81, 207, 102, 0.35)";
+      ctx.lineWidth = safeZoneRadiusRef.current * 2 * w; // dynamic double safe radius
+      ctx.beginPath();
+      ctx.moveTo(shape.points[0].x * w, shape.points[0].y * h);
+      for (let i = 1; i < shape.points.length; i++) {
+        ctx.lineTo(shape.points[i].x * w, shape.points[i].y * h);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
       // Draw shape outline
       ctx.strokeStyle = "#333";
       ctx.lineWidth = 3 * scale;
@@ -797,20 +1227,22 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
       // Draw drawn path
       if (drawnPathRef.current.length > 1) {
-        ctx.strokeStyle = shape.drawingHand ? "#ff9500" : "#6c757d"; // orange if active, gray if not
         ctx.lineWidth = 4 * scale;
-        ctx.beginPath();
-        ctx.moveTo(
-          drawnPathRef.current[0].x * w,
-          drawnPathRef.current[0].y * h,
-        );
         for (let i = 1; i < drawnPathRef.current.length; i++) {
-          ctx.lineTo(
-            drawnPathRef.current[i].x * w,
-            drawnPathRef.current[i].y * h,
+          const p1 = drawnPathRef.current[i - 1];
+          const p2 = drawnPathRef.current[i];
+          ctx.strokeStyle = p2.color || "#ff9500";
+          ctx.beginPath();
+          ctx.moveTo(
+            p1.x * w,
+            p1.y * h,
           );
+          ctx.lineTo(
+            p2.x * w,
+            p2.y * h,
+          );
+          ctx.stroke();
         }
-        ctx.stroke();
       }
     }
     const handState = handStateRef.current;
@@ -820,15 +1252,16 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       const px = hand.smoothPos.x * w;
       const py = hand.smoothPos.y * h;
 
+      const canDraw = handPoseModeRef.current === "any" ? true : hand.closed;
       ctx.beginPath();
       ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
       ctx.arc(px + 2, py + 2, 14 * scale, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.beginPath();
-      ctx.fillStyle = hand.closed
-        ? "rgba(220, 50, 50, 0.95)"
-        : "rgba(50, 200, 80, 0.95)";
+      ctx.fillStyle = canDraw
+        ? "rgba(50, 200, 80, 0.95)" // green for can draw
+        : "rgba(220, 50, 50, 0.95)"; // red for cannot draw
       ctx.arc(px, py, 14 * scale, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = "#fff";
@@ -880,7 +1313,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     }
 
     gameLogicTick();
-    requestAnimationFrame(mainLoop);
+    animationFrameRef.current = requestAnimationFrame(mainLoop);
   }, [syncCanvasSizes, drawOverlay, drawGame, gameLogicTick]);
 
   // ==================== EVENT HANDLERS ====================
@@ -944,6 +1377,110 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     showStatus("✓ Calibration complete! Ready to start.");
   };
 
+  const handleMouseDown = (e) => {
+    if (!isSessionActive) return;
+    const canvas = gameCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    const x = clamp((clientX - rect.left) / rect.width, 0.01, 0.99);
+    const y = clamp((clientY - rect.top) / rect.height, 0.01, 0.99);
+
+    const handState = handStateRef.current;
+    handState.Right.pos = { x, y };
+    handState.Right.smoothPos = { x, y };
+    handState.Right.closed = true;
+    handState.Right.closedFrames = CONFIG.STABLE_FRAMES;
+    handState.Right.openFrames = 0;
+    handState.Right.visible = true;
+
+    setRightHandVisible(true);
+    setRightHandClosed(true);
+
+    mouseStateRef.current = { isDown: true, x, y };
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isSessionActive || !mouseStateRef.current.isDown) return;
+    const canvas = gameCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    const x = clamp((clientX - rect.left) / rect.width, 0.01, 0.99);
+    const y = clamp((clientY - rect.top) / rect.height, 0.01, 0.99);
+
+    const handState = handStateRef.current;
+    handState.Right.pos = { x, y };
+    handState.Right.smoothPos = { x, y };
+    handState.Right.visible = true;
+
+    mouseStateRef.current.x = x;
+    mouseStateRef.current.y = y;
+  };
+
+  const handleMouseUp = () => {
+    if (!mouseStateRef.current.isDown) return;
+    mouseStateRef.current.isDown = false;
+
+    const handState = handStateRef.current;
+    handState.Right.closed = false;
+    handState.Right.closedFrames = 0;
+    handState.Right.openFrames = CONFIG.STABLE_FRAMES;
+    handState.Right.visible = false;
+
+    setRightHandClosed(false);
+    setRightHandVisible(false);
+  };
+
+  const handleTouchStart = (e) => {
+    if (!isSessionActive || !e.touches || e.touches.length === 0) return;
+    const canvas = gameCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches[0].clientX;
+    const clientY = e.touches[0].clientY;
+    const x = clamp((clientX - rect.left) / rect.width, 0.01, 0.99);
+    const y = clamp((clientY - rect.top) / rect.height, 0.01, 0.99);
+
+    const handState = handStateRef.current;
+    handState.Right.pos = { x, y };
+    handState.Right.smoothPos = { x, y };
+    handState.Right.closed = true;
+    handState.Right.closedFrames = CONFIG.STABLE_FRAMES;
+    handState.Right.openFrames = 0;
+    handState.Right.visible = true;
+
+    setRightHandVisible(true);
+    setRightHandClosed(true);
+
+    mouseStateRef.current = { isDown: true, x, y };
+  };
+
+  const handleTouchMove = (e) => {
+    if (!isSessionActive || !mouseStateRef.current.isDown || !e.touches || e.touches.length === 0) return;
+    const canvas = gameCanvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches[0].clientX;
+    const clientY = e.touches[0].clientY;
+    const x = clamp((clientX - rect.left) / rect.width, 0.01, 0.99);
+    const y = clamp((clientY - rect.top) / rect.height, 0.01, 0.99);
+
+    const handState = handStateRef.current;
+    handState.Right.pos = { x, y };
+    handState.Right.smoothPos = { x, y };
+    handState.Right.visible = true;
+
+    mouseStateRef.current.x = x;
+    mouseStateRef.current.y = y;
+  };
+
+  const handleTouchEnd = () => {
+    handleMouseUp();
+  };
+
   const handleStartSession = () => {
     if (!calibrationDone) {
       if (!window.confirm("Calibration recommended. Continue anyway?")) return;
@@ -955,12 +1492,20 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     attemptsRef.current = 0;
     successesRef.current = 0;
     logsRef.current = [];
+    coordinateLogRef.current = [];
+    boardDrawingAttemptsRef.current = [];
+    activeAttemptStartedAtRef.current = null;
+    lastCoordTimeRef.current = 0;
     sessionStartRef.current = Date.now();
 
     spawnShape();
     setTimeRemaining(CONFIG.SESSION_SECONDS);
     setSuccessRate(0);
     setIsSessionActive(true);
+
+    // Start a local storage game record
+    localGameIdRef.current = GameStorage.startGame(shapeRef.current?.points ?? []);
+    setShowAnalyticsBtn(false);
 
     timerIntervalRef.current = setInterval(() => {
       const elapsed = Math.floor((Date.now() - sessionStartRef.current) / 1000);
@@ -984,6 +1529,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
   const handleEndSession = async () => {
     setIsSessionActive(false);
+    finalizeActiveDrawingAttempt();
     logsRef.current.push({
       timestamp: nowSec(),
       event: "session_end",
@@ -995,23 +1541,30 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         ? ((successesRef.current / attemptsRef.current) * 100).toFixed(1)
         : 0;
 
-    // Buffer play data locally
-    const playData = logsRef.current.map(log => ({
-      eventName: log.event,
-      score: log.score,
-      hand: log.hand,
-      responsetime: log.timestamp,
-      shapeType: log.shape_type
-    }));
-    gameSessionBuffer.update({
-      sessionScore: scoreRef.current,
-      playData,
-      coordinates: drawnPathRef.current.map(p => ({ x: p.x, y: p.y, timestamp: nowSec() }))
-    });
+    persistBoardDrawingBuffer();
 
-    alert(
-      `Session Complete!\n\nScore: ${scoreRef.current}\nShapes Completed: ${reps}\nSuccess Rate: ${successRateVal}%\n\nUse the 💾 Save & Exit button to save your data.`,
-    );
+    // Finalize local storage game record
+    if (localGameIdRef.current) {
+      GameStorage.finalizeGame(localGameIdRef.current, {
+        score: scoreRef.current,
+        reps,
+        successRate: parseFloat(successRateVal),
+        currentShapePoints: shapeRef.current?.points ?? [],
+      });
+      setShowAnalyticsBtn(true);
+    }
+
+    try {
+      await gameSessionBuffer.saveAndExit();
+      alert(
+        `Session Complete!\n\nScore: ${scoreRef.current}\nShapes Completed: ${reps}\nSuccess Rate: ${successRateVal}%\n\nYour drawing paths were saved to your dashboard.`,
+      );
+    } catch (error) {
+      console.error("Failed to save board drawing session:", error);
+      alert(
+        `Session Complete!\n\nScore: ${scoreRef.current}\nShapes Completed: ${reps}\nSuccess Rate: ${successRateVal}%\n\nCould not save automatically. Use the 💾 Save & Exit button to retry.`,
+      );
+    }
   };
 
   const handleReset = () => {
@@ -1025,6 +1578,7 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
 
   // ==================== EFFECTS ====================
   useEffect(() => {
+    isUnmountingRef.current = false;
     scoreRef.current = score;
   }, [score]);
 
@@ -1040,27 +1594,64 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     showDebugRef.current = showDebug;
   }, [showDebug]);
 
-  useEffect(() => {
-    setupMediaPipe();
+  // Mount-only: initialize MediaPipe + camera ONCE. Never re-run on state changes.
+  // Using a ref to hold setupMediaPipe so the dependency array stays stable.
+  const setupMediaPipeRef = React.useRef(setupMediaPipe);
+  setupMediaPipeRef.current = setupMediaPipe;
+  const safeCloseModuleRef = React.useRef(safeCloseModule);
+  safeCloseModuleRef.current = safeCloseModule;
 
-    const loopId = requestAnimationFrame(mainLoop);
+  useEffect(() => {
+    setupMediaPipeRef.current();
+
     const handleKeyDown = (e) => {
       if (e.key === "d" || e.key === "D") {
         setShowDebug((prev) => !prev);
       }
     };
-
     document.addEventListener("keydown", handleKeyDown);
+
     return () => {
-      cancelAnimationFrame(loopId);
+      isUnmountingRef.current = true;
       document.removeEventListener("keydown", handleKeyDown);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
-      if (cameraRef.current) cameraRef.current.stop();
-      if (handsModuleRef.current) handsModuleRef.current.close();
-      if (poseModuleRef.current) poseModuleRef.current.close();
+      if (cameraRef.current) {
+        try {
+          cameraRef.current.stop();
+        } catch (error) {
+          console.warn("Failed to stop camera:", error);
+        } finally {
+          cameraRef.current = null;
+        }
+      }
+      safeCloseModuleRef.current(handsModuleRef, "hands");
+      safeCloseModuleRef.current(poseModuleRef, "pose");
+      isInitializedRef.current = false;
     };
-  }, [setupMediaPipe, mainLoop]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount/unmount only
+
+  // Separate effect to (re)start the animation loop when mainLoop ref changes
+  const mainLoopRef = React.useRef(mainLoop);
+  mainLoopRef.current = mainLoop;
+
+  useEffect(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+    }
+    const loop = () => {
+      mainLoopRef.current();
+    };
+    animationFrameRef.current = requestAnimationFrame(loop);
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount/unmount only — mainLoopRef always has latest via ref
 
   // ==================== RENDER ====================
   // ==================== RENDER ====================
@@ -1157,28 +1748,36 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           )}
 
           <div style={styles.handStatus}>
-            {leftHandVisible && (
-              <div
-                style={{
-                  ...styles.handIndicator,
-                  ...(leftHandClosed ? styles.handClosed : styles.handOpen),
-                }}
-              >
-                <span style={styles.dot}></span>
-                <span>Left {leftHandClosed ? "🔴" : "🟢"}</span>
-              </div>
-            )}
-            {rightHandVisible && (
-              <div
-                style={{
-                  ...styles.handIndicator,
-                  ...(rightHandClosed ? styles.handClosed : styles.handOpen),
-                }}
-              >
-                <span style={styles.dot}></span>
-                <span>Right {rightHandClosed ? "🔴" : "🟢"}</span>
-              </div>
-            )}
+            {(() => {
+              const leftCanDraw = handPoseMode === "any" ? leftHandVisible : (leftHandVisible && leftHandClosed);
+              const rightCanDraw = handPoseMode === "any" ? rightHandVisible : (rightHandVisible && rightHandClosed);
+              return (
+                <>
+                  {leftHandVisible && (
+                    <div
+                      style={{
+                        ...styles.handIndicator,
+                        ...(leftCanDraw ? styles.handOpen : styles.handClosed),
+                      }}
+                    >
+                      <span style={styles.dot}></span>
+                      <span>Left {leftCanDraw ? "🟢 Can Draw" : "🔴 Cannot Draw"}</span>
+                    </div>
+                  )}
+                  {rightHandVisible && (
+                    <div
+                      style={{
+                        ...styles.handIndicator,
+                        ...(rightCanDraw ? styles.handOpen : styles.handClosed),
+                      }}
+                    >
+                      <span style={styles.dot}></span>
+                      <span>Right {rightCanDraw ? "🟢 Can Draw" : "🔴 Cannot Draw"}</span>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
 
@@ -1193,6 +1792,62 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           <button onClick={handleStartSession} style={styles.controlButton}>
             {isSessionActive ? "⏸ Pause" : "▶️ Start Therapy"}
           </button>
+          <button 
+            onClick={toggleHandPoseMode} 
+            style={{...styles.controlButton, background: handPoseMode === "strict" ? "#ff922b" : "#51cf66", marginTop: '10px'}}
+          >
+            {handPoseMode === "strict" ? "✊ Posture: Strict (Pinch to Draw)" : "✋ Posture: Any (Always Draw)"}
+          </button>
+          
+          <div style={{ marginTop: '15px', display: 'flex', flexDirection: 'column', gap: '10px', background: isDarkMode ? '#1e293b' : '#f8fafc', padding: '12px', borderRadius: '12px', border: '1px solid ' + (isDarkMode ? '#334155' : '#e2e8f0'), width: '100%' }}>
+            <div style={{ fontSize: '10px', fontWeight: 'bold', color: isDarkMode ? '#94a3b8' : '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'left' }}>
+              🔧 Tracing Zone Adjustments
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: isDarkMode ? '#cbd5e1' : '#334155', minWidth: '110px', textAlign: 'left' }}>
+                🟢 Safe Zone: {(safeZoneRadius * 100).toFixed(1)}%
+              </span>
+              <input
+                type="range"
+                min="0.01"
+                max="0.06"
+                step="0.005"
+                value={safeZoneRadius}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  setSafeZoneRadius(val);
+                  safeZoneRadiusRef.current = val;
+                  if (val > warningZoneRadius) {
+                    setWarningZoneRadius(val + 0.01);
+                    warningZoneRadiusRef.current = val + 0.01;
+                  }
+                }}
+                style={{ flex: 1, accentColor: '#51cf66', cursor: 'pointer' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 'bold', color: isDarkMode ? '#cbd5e1' : '#334155', minWidth: '110px', textAlign: 'left' }}>
+                🟡 Warning: {(warningZoneRadius * 100).toFixed(1)}%
+              </span>
+              <input
+                type="range"
+                min="0.02"
+                max="0.12"
+                step="0.005"
+                value={warningZoneRadius}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  if (val >= safeZoneRadius) {
+                    setWarningZoneRadius(val);
+                    warningZoneRadiusRef.current = val;
+                  }
+                }}
+                style={{ flex: 1, accentColor: '#fcc419', cursor: 'pointer' }}
+              />
+            </div>
+          </div>
         </div>
 
         <div style={themeStyles.stats}>
@@ -1203,6 +1858,10 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           <div style={themeStyles.statItem}>
             <div style={themeStyles.statLabel}>Success Rate</div>
             <div style={themeStyles.statValue}>{Math.round(successRate)}%</div>
+          </div>
+          <div style={themeStyles.statItem}>
+            <div style={themeStyles.statLabel}>Shapes Done</div>
+            <div style={themeStyles.statValue}>{reps}</div>
           </div>
           <div style={themeStyles.statItem}>
             <div style={themeStyles.statLabel}>Session Timer</div>
@@ -1229,6 +1888,37 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
           </button>
         </div>
 
+        {showAnalyticsBtn && (
+          <button
+            onClick={() => {
+              // Open analytics in a new tab passing the game id
+              const url = `/analytics?gameId=${localGameIdRef.current}`;
+              window.open(url, '_blank');
+            }}
+            style={{
+              ...styles.controlButton,
+              marginTop: '10px',
+              background: '#1565c0',
+              width: '100%',
+            }}
+          >
+            📊 View Game Analytics
+          </button>
+        )}
+
+        <button
+          onClick={() => window.open('/analytics', '_blank')}
+          style={{
+            ...themeStyles.actionButton,
+            marginTop: '8px',
+            width: '100%',
+            fontSize: '12px',
+            padding: '7px',
+          }}
+        >
+          🗂 All Games History
+        </button>
+
         <div style={themeStyles.note}>
           <strong style={themeStyles.statValue}>Clinical Focus:</strong> Fine
           motor precision and distal control.
@@ -1236,24 +1926,24 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
       </aside>
 
       <main style={styles.gameArea}>
-        <canvas ref={gameCanvasRef} style={styles.gameCanvas} />
+        <canvas 
+          ref={gameCanvasRef} 
+          style={styles.gameCanvas} 
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        />
         {statusMessage.visible && (
           <div style={themeStyles.statusMessage}>{statusMessage.text}</div>
         )}
       </main>
       <SaveExitButton onBeforeSave={() => {
-        const playData = logsRef.current.map(log => ({
-          eventName: log.event,
-          score: log.score,
-          hand: log.hand,
-          responsetime: log.timestamp,
-          shapeType: log.shape_type
-        }));
-        gameSessionBuffer.update({
-          sessionScore: scoreRef.current,
-          playData,
-          coordinates: drawnPathRef.current.map(p => ({ x: p.x, y: p.y }))
-        });
+        finalizeActiveDrawingAttempt();
+        persistBoardDrawingBuffer();
       }} />
     </div>
   );

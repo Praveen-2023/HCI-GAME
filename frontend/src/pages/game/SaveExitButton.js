@@ -30,7 +30,9 @@ const SaveExitButton = ({ onBeforeSave, disabled }) => {
         console.log('Session saved successfully:', response);
       }
 
-      navigate(-1);
+      const { user } = JSON.parse(localStorage.getItem("user") || "{}");
+      const dashPath = user?.type === "doctor" ? "/doctor/dashboard" : "/patient/dashboard";
+      navigate(dashPath);
     } catch (error) {
       console.error('Failed to save session:', error);
       const exitAnyway = window.confirm(
@@ -38,7 +40,9 @@ const SaveExitButton = ({ onBeforeSave, disabled }) => {
       );
       if (exitAnyway) {
         gameSessionBuffer.discard();
-        navigate(-1);
+        const { user } = JSON.parse(localStorage.getItem("user") || "{}");
+        const dashPath = user?.type === "doctor" ? "/doctor/dashboard" : "/patient/dashboard";
+        navigate(dashPath);
       }
     } finally {
       setIsSaving(false);

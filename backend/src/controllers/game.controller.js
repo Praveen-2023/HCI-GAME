@@ -1,5 +1,86 @@
 const User = require('../models/user.model');
 const GameSession = require('../models/gameSession.model');
+const BoardDrawingSession = require('../models/boardDrawingSession.model');
+const PianoSession = require('../models/pianoSession.model');
+
+const toNumber = (value, fallback = undefined) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+};
+
+const normalizeJoint = (joint) => {
+  if (!joint || joint.x === undefined || joint.y === undefined) return undefined;
+  return {
+    x: toNumber(joint.x, 0),
+    y: toNumber(joint.y, 0)
+  };
+};
+
+const normalizePoint = (point) => ({
+  x: toNumber(point?.x, 0),
+  y: toNumber(point?.y, 0),
+  screenX: toNumber(point?.screenX),
+  screenY: toNumber(point?.screenY),
+  timestamp: toNumber(point?.timestamp, 0),
+  zone: point?.zone,
+  color: point?.color,
+  leftShoulder: normalizeJoint(point?.leftShoulder),
+  rightShoulder: normalizeJoint(point?.rightShoulder),
+  leftElbow: normalizeJoint(point?.leftElbow),
+  rightElbow: normalizeJoint(point?.rightElbow),
+  leftWrist: normalizeJoint(point?.leftWrist),
+  rightWrist: normalizeJoint(point?.rightWrist),
+  palm: normalizeJoint(point?.palm)
+});
+
+const normalizePath = (path) => {
+  if (!Array.isArray(path)) return [];
+  return path
+    .filter((point) => point && point.x !== undefined && point.y !== undefined)
+    .map(normalizePoint);
+};
+
+const normalizeAttempt = (attempt, index) => {
+  const drawnPath = normalizePath(attempt?.drawnPath);
+  const targetPath = normalizePath(attempt?.targetPath);
+  const total = toNumber(attempt?.total, targetPath.length);
+  const hits = toNumber(attempt?.hits, 0);
+  const completion = toNumber(
+    attempt?.completion,
+    total > 0 ? hits / total : 0
+  );
+
+  return {
+    attemptNumber: toNumber(attempt?.attemptNumber, index + 1),
+    requestedShape: attempt?.requestedShape || attempt?.shapeType || 'shape',
+    shapeType: attempt?.shapeType || attempt?.requestedShape || 'shape',
+    hand: attempt?.hand,
+    startedAt: toNumber(attempt?.startedAt, 0),
+    endedAt: toNumber(attempt?.endedAt, 0),
+    canvasWidth: toNumber(attempt?.canvasWidth, 0),
+    canvasHeight: toNumber(attempt?.canvasHeight, 0),
+    targetPath,
+    drawnPath,
+    pathMatrix: Array.isArray(attempt?.pathMatrix)
+      ? attempt.pathMatrix
+          .filter((row) => Array.isArray(row))
+          .map((row) => row.map((value) => toNumber(value, 0)))
+      : drawnPath.map((point) => [
+          point.screenX ?? point.x,
+          point.screenY ?? point.y,
+          point.timestamp ?? 0
+        ]),
+    hits,
+    total,
+    completion,
+    success: Boolean(attempt?.success),
+    scoreAfter: toNumber(attempt?.scoreAfter, 0),
+    traceQuality: toNumber(attempt?.traceQuality),
+    pointsEarned: toNumber(attempt?.pointsEarned),
+    safeZoneRadius: toNumber(attempt?.safeZoneRadius),
+    warningZoneRadius: toNumber(attempt?.warningZoneRadius)
+  };
+};
 
 // Update level span (editable by doctor and caretaker)
 exports.updateLevelSpan = async (req, res) => {
@@ -89,7 +170,12 @@ exports.saveGameSession = async (req, res) => {
       playData,
       systemMetrics,
       coordinates,
-      sessionScore: clientSessionScore
+      boardDrawingAttempts,
+      sessionScore: clientSessionScore,
+      mode,
+      fingerTimeouts,
+      laptopMovements,
+      mobileMovements
     } = req.body;
 
     const user = await User.findById(userId);
@@ -113,17 +199,50 @@ exports.saveGameSession = async (req, res) => {
       if (sessionScore < 0) sessionScore = 0;
     }
 
-    const newSession = new GameSession({
-      user: userId,
-      gameType: type,
-      gameName: name,
-      time: new Date(),
-      levelspan: levelspan,
-      sessionScore: sessionScore,
-      systemMetrics: systemMetrics || undefined,
-      coordinates: coordinates || undefined,
-      play: playData || []
-    });
+    let attempts = undefined;
+    let coords = coordinates || undefined;
+
+    if (type === 'board_drawing') {
+      attempts = Array.isArray(boardDrawingAttempts)
+        ? boardDrawingAttempts
+            .map(normalizeAttempt)
+            .filter((attempt) => attempt.drawnPath.length > 1)
+        : [];
+      coords = normalizePath(coordinates);
+    }
+
+    let newSession;
+    
+    if (type === 'type1' || type.startsWith('piano_')) {
+      newSession = new PianoSession({
+        user: userId,
+        gameType: type,
+        gameName: name,
+        time: new Date(),
+        levelspan: levelspan,
+        sessionScore: sessionScore,
+        systemMetrics: systemMetrics || undefined,
+        coordinates: coordinates || undefined,
+        play: playData || [],
+        mode: mode || 'laptop',
+        fingerTimeouts: fingerTimeouts || undefined,
+        laptopMovements: laptopMovements || undefined,
+        mobileMovements: mobileMovements || undefined
+      });
+    } else {
+      newSession = new GameSession({
+        user: userId,
+        gameType: type,
+        gameName: name,
+        time: new Date(),
+        levelspan: levelspan,
+        sessionScore: sessionScore,
+        systemMetrics: systemMetrics || undefined,
+        coordinates: type === 'board_drawing' ? coords : (coordinates || undefined),
+        boardDrawingAttempts: type === 'board_drawing' ? attempts : (boardDrawingAttempts || undefined),
+        play: playData || []
+      });
+    }
 
     await newSession.save();
 
@@ -173,14 +292,23 @@ exports.getDetailedAnalytics = async (req, res) => {
       });
     }
 
-    const sessions = await GameSession.find({ user: userId }).sort({ time: 1 });
+    const gameSessions = await GameSession.find({ user: userId }).lean();
+    const boardSessions = await BoardDrawingSession.find({ user: userId }).lean();
+    const pianoSessions = await PianoSession.find({ user: userId }).lean();
+    const sessions = [...gameSessions, ...boardSessions, ...pianoSessions].sort((a, b) => new Date(a.time) - new Date(b.time));
     
     // Group by game type
     const grouped = sessions.reduce((acc, session) => {
-      if (!acc[session.gameType]) {
-        acc[session.gameType] = { type: session.gameType, name: session.gameName, eachGameStats: [] };
+      let gType = session.gameType;
+      let gName = session.gameName;
+      if (gType === 'type1' || gType.startsWith('piano_')) {
+        gType = 'type1';
+        gName = 'Piano Reaction Game';
       }
-      acc[session.gameType].eachGameStats.push(session);
+      if (!acc[gType]) {
+        acc[gType] = { type: gType, name: gName, eachGameStats: [] };
+      }
+      acc[gType].eachGameStats.push(session);
       return acc;
     }, {});
     
@@ -198,23 +326,39 @@ exports.getDetailedAnalytics = async (req, res) => {
 
       sessions.forEach(session => {
         totalScore += session.sessionScore || 0;
-        session.play.forEach(entry => {
-          if (entry.correct === 1) {
-            totalCorrect++;
-            if (entry.responsetime !== -1 && entry.responsetime !== undefined) {
-              totalResponseTime += entry.responsetime;
+        if (session.gameType === 'board_drawing') {
+          const attempts = session.boardDrawingAttempts || [];
+          attempts.forEach(attempt => {
+            if (attempt.success) {
+              totalCorrect++;
+            } else {
+              totalIncorrect++;
+            }
+            const duration = (attempt.endedAt || 0) - (attempt.startedAt || 0);
+            if (duration >= 0) {
+              totalResponseTime += duration;
               validResponseCount++;
             }
-          } else if (entry.correct === -1) {
-            totalIncorrect++;
-            if (entry.responsetime !== -1 && entry.responsetime !== undefined) {
-              totalResponseTime += entry.responsetime;
-              validResponseCount++;
+          });
+        } else {
+          session.play.forEach(entry => {
+            if (entry.correct === 1) {
+              totalCorrect++;
+              if (entry.responsetime !== -1 && entry.responsetime !== undefined) {
+                totalResponseTime += entry.responsetime;
+                validResponseCount++;
+              }
+            } else if (entry.correct === -1) {
+              totalIncorrect++;
+              if (entry.responsetime !== -1 && entry.responsetime !== undefined) {
+                totalResponseTime += entry.responsetime;
+                validResponseCount++;
+              }
+            } else if (entry.correct === 0) {
+              totalNotDone++;
             }
-          } else if (entry.correct === 0) {
-            totalNotDone++;
-          }
-        });
+          });
+        }
       });
 
       const avgResponseTime = validResponseCount > 0 
@@ -278,14 +422,23 @@ exports.getBasicStats = async (req, res) => {
       });
     }
 
-    const sessions = await GameSession.find({ user: userId }).sort({ time: 1 });
+    const gameSessions = await GameSession.find({ user: userId }).lean();
+    const boardSessions = await BoardDrawingSession.find({ user: userId }).lean();
+    const pianoSessions = await PianoSession.find({ user: userId }).lean();
+    const sessions = [...gameSessions, ...boardSessions, ...pianoSessions].sort((a, b) => new Date(a.time) - new Date(b.time));
     
     // Group by game type
     const grouped = sessions.reduce((acc, session) => {
-      if (!acc[session.gameType]) {
-        acc[session.gameType] = { type: session.gameType, name: session.gameName, eachGameStats: [] };
+      let gType = session.gameType;
+      let gName = session.gameName;
+      if (gType === 'type1' || gType.startsWith('piano_')) {
+        gType = 'type1';
+        gName = 'Piano Reaction Game';
       }
-      acc[session.gameType].eachGameStats.push(session);
+      if (!acc[gType]) {
+        acc[gType] = { type: gType, name: gName, eachGameStats: [] };
+      }
+      acc[gType].eachGameStats.push(session);
       return acc;
     }, {});
     
@@ -294,10 +447,31 @@ exports.getBasicStats = async (req, res) => {
     const gamesData = games.map(gameObj => {
       const sessions = gameObj.eachGameStats ? gameObj.eachGameStats.slice(-30) : [];
       const basicSessions = sessions.map(session => {
-        const correct = session.play.filter(p => p.correct === 1).length;
-        const incorrect = session.play.filter(p => p.correct === -1).length;
-        const notDone = session.play.filter(p => p.correct === 0).length;
-        const responsetime = session.play.reduce((sum, p) => sum + (p.responsetime || 0), 0);
+        let correct = 0;
+        let incorrect = 0;
+        let notDone = 0;
+        let responsetime = 0;
+        let total = 0;
+
+        if (session.gameType === 'board_drawing') {
+          const attempts = session.boardDrawingAttempts || [];
+          total = attempts.length;
+          attempts.forEach(attempt => {
+            if (attempt.success) {
+              correct++;
+            } else {
+              incorrect++;
+            }
+            const duration = (attempt.endedAt || 0) - (attempt.startedAt || 0);
+            responsetime += Math.max(0, duration);
+          });
+        } else {
+          correct = session.play.filter(p => p.correct === 1).length;
+          incorrect = session.play.filter(p => p.correct === -1).length;
+          notDone = session.play.filter(p => p.correct === 0).length;
+          responsetime = session.play.reduce((sum, p) => sum + (p.responsetime || 0), 0);
+          total = session.play.length;
+        }
 
         return {
           session: session,
@@ -306,7 +480,7 @@ exports.getBasicStats = async (req, res) => {
           incorrect,
           responsetime,
           notDone,
-          total: session.play.length,
+          total,
           sessionScore: session.sessionScore,
           systemMetrics: session.systemMetrics
         };

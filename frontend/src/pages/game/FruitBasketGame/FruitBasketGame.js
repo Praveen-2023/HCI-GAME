@@ -5,6 +5,27 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../../../context/AuthContext";
 import gameSessionBuffer from "../../../services/gameSessionBuffer";
 import SaveExitButton from "../SaveExitButton";
+import {
+  COORD_SAMPLE_INTERVAL_MS,
+  MAX_COORDS_PER_SESSION,
+  DEFAULT_SESSION_SECONDS,
+  FRUIT_BASKET_CALIBRATION_SECONDS,
+  FRUIT_BASKET_HAND_TEST_DURATION_MS,
+  FRUIT_BASKET_GRID_ROWS,
+  FRUIT_BASKET_GRID_COLS,
+  FRUIT_BASKET_PICK_DISTANCE,
+  FRUIT_BASKET_DROP_DISTANCE,
+  FRUIT_BASKET_SCORE_PER_DROP,
+  FRUIT_BASKET_SMOOTH_ALPHA,
+  FRUIT_BASKET_STABLE_FRAMES,
+  FRUIT_BASKET_DRAW_FPS,
+  FRUIT_BASKET_PICK_DWELL_MS,
+  FRUIT_BASKET_DROP_DWELL_MS,
+  FRUIT_BASKET_TRIAL_TIMEOUT_MS,
+  FRUIT_BASKET_MIN_SHOULDER_VISIBILITY,
+  FRUIT_BASKET_IDEAL_SHOULDER_Y_RANGE,
+  FRUIT_BASKET_MIN_SHOULDER_WIDTH,
+} from "../../../constants";
 
 // ==================== MEDIAPIPE MODULE-LEVEL SINGLETONS ====================
 // Stored outside the component so React StrictMode's double-mount does NOT
@@ -13,25 +34,26 @@ let _handsInst = null;
 let _poseInst = null;
 let _camInst = null;
 
+
 // ==================== CONFIGURATION ====================
 const CONFIG = {
-  SESSION_SECONDS: 300,
-  CALIBRATION_SECONDS: 20,
-  HAND_TEST_DURATION_MS: 5000, // 5 seconds per hand test
-  GRID_ROWS: 3,
-  GRID_COLS: 3,
-  PICK_DISTANCE: 0.08,
-  DROP_DISTANCE: 0.1,
-  SCORE_PER_DROP: 10,
-  SMOOTH_ALPHA: 0.7,
-  STABLE_FRAMES: 2,
-  DRAW_FPS: 30,
-  PICK_DWELL_MS: 250,
-  DROP_DWELL_MS: 250,
-  TRIAL_TIMEOUT_MS: 10000, // 10 seconds per fruit
-  MIN_SHOULDER_VISIBILITY: 0.5,
-  IDEAL_SHOULDER_Y_RANGE: [0.15, 0.6],
-  MIN_SHOULDER_WIDTH: 0.12,
+  SESSION_SECONDS: DEFAULT_SESSION_SECONDS,
+  CALIBRATION_SECONDS: FRUIT_BASKET_CALIBRATION_SECONDS,
+  HAND_TEST_DURATION_MS: FRUIT_BASKET_HAND_TEST_DURATION_MS,
+  GRID_ROWS: FRUIT_BASKET_GRID_ROWS,
+  GRID_COLS: FRUIT_BASKET_GRID_COLS,
+  PICK_DISTANCE: FRUIT_BASKET_PICK_DISTANCE,
+  DROP_DISTANCE: FRUIT_BASKET_DROP_DISTANCE,
+  SCORE_PER_DROP: FRUIT_BASKET_SCORE_PER_DROP,
+  SMOOTH_ALPHA: FRUIT_BASKET_SMOOTH_ALPHA,
+  STABLE_FRAMES: FRUIT_BASKET_STABLE_FRAMES,
+  DRAW_FPS: FRUIT_BASKET_DRAW_FPS,
+  PICK_DWELL_MS: FRUIT_BASKET_PICK_DWELL_MS,
+  DROP_DWELL_MS: FRUIT_BASKET_DROP_DWELL_MS,
+  TRIAL_TIMEOUT_MS: FRUIT_BASKET_TRIAL_TIMEOUT_MS,
+  MIN_SHOULDER_VISIBILITY: FRUIT_BASKET_MIN_SHOULDER_VISIBILITY,
+  IDEAL_SHOULDER_Y_RANGE: FRUIT_BASKET_IDEAL_SHOULDER_Y_RANGE,
+  MIN_SHOULDER_WIDTH: FRUIT_BASKET_MIN_SHOULDER_WIDTH,
 };
 
 // ==================== MAIN COMPONENT ====================
@@ -45,7 +67,7 @@ const FruitBasketGame = () => {
   const [calibTimeLeft, setCalibTimeLeft] = useState(0);
   const [isSessionActive, setIsSessionActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [usingMouseFallback] = useState(false);
+  const [usingMouseFallback, setUsingMouseFallback] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
   const [statusMessage, setStatusMessage] = useState({
     text: "",
@@ -84,6 +106,7 @@ const FruitBasketGame = () => {
   const sessionStartRef = useRef(null);
   const timerIntervalRef = useRef(null);
   const calibIntervalRef = useRef(null);
+  const cameraRef = useRef(null);
   const lastDrawTimeRef = useRef(0);
   const logsRef = useRef([]);
   const attemptsRef = useRef(0);
@@ -171,6 +194,9 @@ const FruitBasketGame = () => {
   const gridHolesRef = useRef([]);
   const fruitRef = useRef(null);
   const basketIdxRef = useRef(null);
+  const coordinateLogRef = useRef([]);
+  const lastLeftCoordTimeRef = useRef(0);
+  const lastRightCoordTimeRef = useRef(0);
   const lastPoseResultsRef = useRef(null);
 
   // ==================== UTILITY FUNCTIONS ====================
@@ -626,6 +652,19 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     ["Left", "Right"].forEach((label) => {
       const hand = handState[label];
       if (!hand.smoothPos || !hand.visible) return;
+      
+      // Track downsampled coordinates for relative hand trajectory visualization
+      const lastHandCoordTimeRef = label === "Left" ? lastLeftCoordTimeRef : lastRightCoordTimeRef;
+      if (sessionStartRef.current && Date.now() - lastHandCoordTimeRef.current > COORD_SAMPLE_INTERVAL_MS) {
+        if (coordinateLogRef.current.length < MAX_COORDS_PER_SESSION) {
+          coordinateLogRef.current.push({
+            x: hand.smoothPos.x,
+            y: hand.smoothPos.y,
+            timestamp: nowSec()
+          });
+        }
+        lastHandCoordTimeRef.current = Date.now();
+      }
 
       const source = gridHolesRef.current[fruitRef.current.sourceIdx];
       const basket = gridHolesRef.current[basketIdxRef.current];
@@ -1397,6 +1436,9 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
     }, 1000);
 
     logsRef.current.push({ timestamp: 0, event: "session_start" });
+    coordinateLogRef.current = [];
+    lastLeftCoordTimeRef.current = 0;
+    lastRightCoordTimeRef.current = 0;
     gameSessionBuffer.init('fruit_basket', 'Arm – Fruit Fetch');
     showStatus("🎮 Session started! Close hand to grab fruit!", 3000);
   };
@@ -1517,7 +1559,18 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         ? ((successesRef.current / attemptsRef.current) * 100).toFixed(1)
         : 0;
 
-    saveSessionDataToBuffer();
+    // Buffer play data locally
+    const playData = logsRef.current.map(log => ({
+      eventName: log.event,
+      score: log.score,
+      hand: log.hand,
+      responsetime: log.timestamp
+    }));
+    gameSessionBuffer.update({
+      sessionScore: scoreRef.current,
+      playData,
+      coordinates: coordinateLogRef.current.map(p => ({ ...p }))
+    });
 
     alert(
       `Session Complete!\n\nScore: ${scoreRef.current}\nARAT Score: ${aratTotalScoreRef.current}\nReps: ${reps}\nSuccess Rate: ${successRateVal}%\n\nUse the 💾 Save & Exit button to save your data.`,
@@ -1569,9 +1622,15 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
   useEffect(() => {
     showDebugRef.current = showDebug;
   }, [showDebug]);
+  // Mount-only refs so setup/cleanup never re-runs on state changes
+  const _setupGridRef = React.useRef(setupGrid);
+  _setupGridRef.current = setupGrid;
+  const _setupMPRef = React.useRef(setupMediaPipe);
+  _setupMPRef.current = setupMediaPipe;
+
   useEffect(() => {
-    setupGrid();
-    setupMediaPipe();
+    _setupGridRef.current();
+    _setupMPRef.current();
 
     let loopId;
     const runLoop = () => {
@@ -1587,18 +1646,45 @@ State: ${isClosed ? "🔴 CLOSED" : "🟢 OPEN"}`);
         setShowDebug((prev) => !prev);
       }
     };
-
     document.addEventListener("keydown", handleKeyDown);
+
     return () => {
       cancelAnimationFrame(loopId);
       document.removeEventListener("keydown", handleKeyDown);
       if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
       if (calibIntervalRef.current) clearInterval(calibIntervalRef.current);
-      // Do NOT stop _camInst or close _handsInst/_poseInst here.
-      // They are module-level singletons that must survive React StrictMode
-      // remounts. Destroying them causes WASM re-init conflicts on next mount.
+      if (cameraRef.current) {
+        try {
+          cameraRef.current.stop();
+        } catch (e) {
+          console.warn("Error stopping camera:", e);
+        }
+      }
+      if (handsModuleRef.current) {
+        try {
+          handsModuleRef.current.close();
+        } catch (e) {
+          if (!String(e?.message || "").includes("already deleted")) {
+            console.warn("Error closing hands module:", e);
+          }
+        } finally {
+          handsModuleRef.current = null;
+        }
+      }
+      if (poseModuleRef.current) {
+        try {
+          poseModuleRef.current.close();
+        } catch (e) {
+          if (!String(e?.message || "").includes("already deleted")) {
+            console.warn("Error closing pose module:", e);
+          }
+        } finally {
+          poseModuleRef.current = null;
+        }
+      }
     };
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // mount/unmount only
   // ==================== RENDER ====================
   const themeStyles = {
     container: {
@@ -1822,6 +1908,20 @@ Calibration:
             />
             <span>Assistive Mode (Dwell pick/drop)</span>
           </label>
+          <label style={styles.checkboxLabel}>
+            <input
+              type="checkbox"
+              checked={usingMouseFallback}
+              disabled={isSessionActive}
+              onChange={(e) => {
+                const val = e.target.checked;
+                setUsingMouseFallback(val);
+                usingMouseFallbackRef.current = val;
+              }}
+              style={styles.checkbox}
+            />
+            <span>Mouse Fallback (Test without Webcam)</span>
+          </label>
         </div>
         
         <div style={themeStyles.stats}>
@@ -1841,7 +1941,7 @@ Calibration:
             <div style={themeStyles.statLabel}>Timer</div>
             <div style={themeStyles.statValue}>{formatTime(timeRemaining)}</div>
           </div>
-          <div style={themeStyles.statItem} style={{ gridColumn: "span 2", textAlign: "center" }}>
+          <div style={{ ...themeStyles.statItem, gridColumn: "span 2", textAlign: "center" }}>
             <div style={themeStyles.statLabel}>Success Rate</div>
             <div style={themeStyles.statValue}>{successRate}%</div>
           </div>
@@ -1884,7 +1984,17 @@ Calibration:
         )}
       </main>
       <SaveExitButton onBeforeSave={() => {
-        saveSessionDataToBuffer();
+        const playData = logsRef.current.map(log => ({
+          eventName: log.event,
+          score: log.score,
+          hand: log.hand,
+          responsetime: log.timestamp
+        }));
+        gameSessionBuffer.update({ 
+          sessionScore: scoreRef.current, 
+          playData,
+          coordinates: coordinateLogRef.current.map(p => ({ ...p }))
+        });
       }} />
     </div>
   );

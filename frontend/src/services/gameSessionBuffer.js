@@ -19,12 +19,17 @@ const gameSessionBuffer = {
       startedAt: new Date().toISOString(),
       playData: [],
       coordinates: [],
+      boardDrawingAttempts: [],
       systemMetrics: {
         userAgent: navigator.userAgent,
         resolution: `${window.innerWidth}x${window.innerHeight}`
       },
       sessionScore: 0,
       levelspan: null,
+      mode: 'laptop',
+      fingerTimeouts: null,
+      laptopMovements: [],
+      mobileMovements: [],
       meta: {} // any game-specific metadata
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
@@ -69,6 +74,39 @@ const gameSessionBuffer = {
   },
 
   /**
+   * Append per-attempt board drawing path data to the local buffer.
+   */
+  addBoardDrawingAttempt(attempt) {
+    const session = this.get();
+    if (!session) return;
+    if (!session.boardDrawingAttempts) session.boardDrawingAttempts = [];
+    session.boardDrawingAttempts.push(attempt);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  },
+
+  /**
+   * Append laptop movement data to the local buffer.
+   */
+  addLaptopMovement(movement) {
+    const session = this.get();
+    if (!session) return;
+    if (!session.laptopMovements) session.laptopMovements = [];
+    session.laptopMovements.push(movement);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  },
+
+  /**
+   * Append mobile movement data to the local buffer.
+   */
+  addMobileMovement(movement) {
+    const session = this.get();
+    if (!session) return;
+    if (!session.mobileMovements) session.mobileMovements = [];
+    session.mobileMovements.push(movement);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+  },
+
+  /**
    * Update session-level fields (score, levelspan, meta, etc.)
    */
   update(fields) {
@@ -95,10 +133,17 @@ const gameSessionBuffer = {
       levelspan: session.levelspan,
       playData: session.playData,
       systemMetrics: session.systemMetrics,
-      coordinates: session.coordinates.length > 0 ? session.coordinates : undefined
+      coordinates: session.coordinates.length > 0 ? session.coordinates : undefined,
+      boardDrawingAttempts: session.boardDrawingAttempts?.length > 0 ? session.boardDrawingAttempts : undefined,
+      mode: session.mode,
+      fingerTimeouts: session.fingerTimeouts,
+      laptopMovements: session.laptopMovements,
+      mobileMovements: session.mobileMovements
     };
 
-    const response = await gameService.saveGameSession(payload);
+    const response = session.gameType === 'board_drawing'
+      ? await gameService.saveBoardDrawingSession(payload)
+      : await gameService.saveGameSession(payload);
     localStorage.removeItem(STORAGE_KEY);
     return response;
   },

@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { gameService } from "../../services/gameService";
+import BoardDrawingTrajectoryReplay from "../game/BoardDrawingTrajectoryReplay";
+import DrawingPerformancePanel from "../../components/dashboard/DrawingPerformancePanel";
 import {
   ArrowLeft,
   TrendingUp,
   Target,
   Clock,
   Zap,
-  Settings,
+  Settings
 } from "lucide-react";
 import {
   LineChart,
@@ -27,6 +29,675 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import thumbImage from "../../assets/hands/hand_thumb_active_1779432908101.png";
+import indexImage from "../../assets/hands/hand_index_active_1779432920829.png";
+import middleImage from "../../assets/hands/hand_middle_active_1779432935604.png";
+import ringImage from "../../assets/hands/hand_ring_active_1779432950085.png";
+import pinkyImage from "../../assets/hands/hand_pinky_active_1779432966168.png";
+
+const CoordinateVisualizer = ({ coordinates }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [isLooping, setIsLooping] = useState(false);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    setCurrentIdx(0);
+    setIsPlaying(false);
+  }, [coordinates]);
+
+  useEffect(() => {
+    if (isPlaying) {
+      const intervalTime = Math.max(10, Math.min(200, 150 / playbackSpeed));
+      timerRef.current = setInterval(() => {
+        setCurrentIdx((prev) => {
+          if (prev >= coordinates.length - 1) {
+            if (isLooping) {
+              return 0;
+            } else {
+              setIsPlaying(false);
+              return prev;
+            }
+          }
+          return prev + 1;
+        });
+      }, intervalTime);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isPlaying, coordinates, playbackSpeed, isLooping]);
+
+  const validCoords = Array.isArray(coordinates)
+    ? coordinates.filter(p => p && typeof p.x === 'number' && typeof p.y === 'number')
+    : [];
+
+  if (validCoords.length === 0) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-xl p-8 border border-gray-150 dark:border-gray-700 text-center mt-6 shadow-sm">
+        <div className="mb-3 text-5xl">🖐️</div>
+        <p className="font-bold text-gray-800 dark:text-gray-200 mb-1 text-lg">No Movement Data Yet</p>
+        <p className="text-sm text-gray-400 max-w-md mx-auto leading-relaxed">
+          Hand trajectory is recorded automatically during gameplay. Play a session to see movement path, velocity profile, and tremor analysis.
+        </p>
+      </div>
+    );
+  }
+
+  const safeIdx = Math.min(currentIdx, validCoords.length - 1);
+  const currentPoint = validCoords[safeIdx] || validCoords[0];
+
+  let totalDistance = 0;
+  let maxSpeed = 0;
+  let jitterSum = 0;
+  const speeds = [];
+
+  for (let i = 1; i < validCoords.length; i++) {
+    const p1 = validCoords[i - 1];
+    const p2 = validCoords[i];
+    const d = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    totalDistance += d;
+
+    const dt = p2.timestamp !== undefined && p1.timestamp !== undefined 
+      ? (p2.timestamp - p1.timestamp) 
+      : 0.15;
+    const speed = d / (dt || 0.15);
+    speeds.push(speed);
+    if (speed > maxSpeed) maxSpeed = speed;
+
+    if (i > 1) {
+      const prevSpeed = speeds[i - 2];
+      jitterSum += Math.abs(speed - prevSpeed);
+    }
+  }
+
+  const avgSpeed = speeds.length > 0 ? speeds.reduce((a, b) => a + b, 0) / speeds.length : 0;
+  const jitterScore = speeds.length > 1 ? (jitterSum / (speeds.length - 1)) * 100 : 0;
+
+  return (
+    <div className="bg-white dark:bg-gray-850 rounded-xl p-6 border border-gray-150 dark:border-gray-800 mt-4 shadow-sm transition-all duration-300">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b dark:border-gray-800 pb-4">
+        <div>
+          <h3 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-secondary-600 dark:from-primary-400 dark:to-secondary-400">
+            Movement Path Trajectory & Replay
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 font-medium">
+            Visualize relative hand displacement, velocity profiles, and clinical tremor patterns.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="px-3 py-1 bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 text-xs font-bold rounded-full">
+            {coordinates.length} positions
+          </span>
+          <span className="px-3 py-1 bg-primary-50 dark:bg-primary-950/30 text-primary-600 dark:text-primary-400 text-xs font-bold rounded-full">
+            Dynamic Sample Rate
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 flex flex-col justify-between">
+          <div className="relative w-full aspect-video bg-gray-900 rounded-2xl overflow-hidden border border-gray-800 shadow-inner group">
+            <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:5%_5%] opacity-20"></div>
+            
+            <svg viewBox="0 0 100 100" className="w-full h-full p-4" preserveAspectRatio="none">
+              <polyline
+                points={validCoords.map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
+                fill="none"
+                stroke="#4b5563"
+                strokeWidth="0.75"
+                strokeDasharray="2,2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              
+              <polyline
+                points={validCoords.slice(0, safeIdx + 1).map(p => `${p.x * 100},${p.y * 100}`).join(' ')}
+                fill="none"
+                stroke="#10B981"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="transition-all duration-75"
+              />
+
+              <circle cx={validCoords[0].x * 100} cy={validCoords[0].y * 100} r="1.5" fill="#3B82F6" stroke="#fff" strokeWidth="0.5" />
+              <circle cx={validCoords[validCoords.length-1].x * 100} cy={validCoords[validCoords.length-1].y * 100} r="1.5" fill="#EF4444" stroke="#fff" strokeWidth="0.5" />
+
+              <circle
+                cx={currentPoint.x * 100}
+                cy={currentPoint.y * 100}
+                r="3.5"
+                fill="#3B82F6"
+                fillOpacity="0.4"
+                className="animate-pulse"
+              />
+              <circle
+                cx={currentPoint.x * 100}
+                cy={currentPoint.y * 100}
+                r="1.8"
+                fill="#3B82F6"
+                stroke="#fff"
+                strokeWidth="0.5"
+              />
+            </svg>
+
+            <div className="absolute top-3 left-3 flex gap-2 text-[10px] bg-black/75 px-2.5 py-1 rounded-lg border border-gray-800 text-gray-300 font-bold backdrop-blur-sm shadow-md">
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span> Start</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Path</span>
+              <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500"></span> End</span>
+            </div>
+            
+            <div className="absolute bottom-3 right-3 text-[10px] bg-black/75 px-2 py-1 rounded-lg border border-gray-800 text-gray-400 font-mono">
+              Point {safeIdx + 1}/{validCoords.length}
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setIsPlaying(!isPlaying)}
+                className={`p-2.5 rounded-xl flex items-center justify-center text-white transition-all transform active:scale-95 ${
+                  isPlaying 
+                    ? "bg-amber-500 hover:bg-amber-600" 
+                    : "bg-primary-500 hover:bg-primary-600"
+                }`}
+                title={isPlaying ? "Pause" : "Play"}
+              >
+                {isPlaying ? (
+                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+                ) : (
+                  <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                )}
+              </button>
+              
+              <button
+                type="button"
+                onClick={() => { setIsPlaying(false); setCurrentIdx(0); }}
+                className="p-2.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 rounded-xl transition-all active:scale-95 border dark:border-gray-600"
+                title="Reset"
+              >
+                <svg className="w-4 h-4 fill-none stroke-current" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3-3 3 3m-3-3v12" />
+                </svg>
+              </button>
+
+              <div className="flex-1 flex items-center">
+                <input
+                  type="range"
+                  min="0"
+                  max={validCoords.length - 1}
+                  value={safeIdx}
+                  onChange={(e) => {
+                    setIsPlaying(false);
+                    setCurrentIdx(parseInt(e.target.value));
+                  }}
+                  className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
+                />
+              </div>
+
+              <select
+                value={playbackSpeed}
+                onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+                className="px-2 py-1.5 text-xs font-bold bg-gray-100 dark:bg-gray-700 border dark:border-gray-600 rounded-lg outline-none cursor-pointer dark:text-white"
+              >
+                <option value="0.5">0.5x</option>
+                <option value="1">1.0x</option>
+                <option value="2">2.0x</option>
+                <option value="4">4.0x</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => setIsLooping(!isLooping)}
+                className={`p-2 rounded-lg border transition-all ${
+                  isLooping 
+                    ? "bg-indigo-50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800" 
+                    : "bg-transparent text-gray-400 border-gray-200 dark:border-gray-700"
+                }`}
+                title="Loop"
+              >
+                <svg className="w-4 h-4 fill-none stroke-current" strokeWidth="2.5" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 1121.21 7.89M9 11l3-3 3 3" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-gray-50 dark:bg-gray-900 rounded-2xl p-5 border dark:border-gray-800 flex flex-col justify-between">
+          <div>
+            <h4 className="text-xs font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-4">
+              Kinematic Metrics
+            </h4>
+            
+            <div className="space-y-3.5">
+              <div className="flex justify-between items-center border-b dark:border-gray-800 pb-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Path Distance</span>
+                <span className="text-xs font-bold dark:text-white">{totalDistance.toFixed(2)} units</span>
+              </div>
+              
+              <div className="flex justify-between items-center border-b dark:border-gray-800 pb-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Avg Velocity</span>
+                <span className="text-xs font-bold dark:text-white">{(avgSpeed * 10).toFixed(1)} units/s</span>
+              </div>
+
+              <div className="flex justify-between items-center border-b dark:border-gray-800 pb-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Peak Velocity</span>
+                <span className="text-xs font-bold dark:text-white">{(maxSpeed * 10).toFixed(1)} units/s</span>
+              </div>
+
+              <div className="flex justify-between items-center pb-1">
+                <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Jitter (Tremor Index)</span>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${
+                  jitterScore < 8 
+                    ? "text-green-600 bg-green-50 dark:bg-green-950/20" 
+                    : jitterScore < 18 
+                      ? "text-yellow-600 bg-yellow-50 dark:bg-yellow-950/20" 
+                      : "text-red-600 bg-red-50 dark:bg-red-950/20"
+                }`}>
+                  {jitterScore.toFixed(1)}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-white dark:bg-gray-800 p-3 rounded-xl border dark:border-gray-700">
+            <h5 className="text-[9px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest mb-1.5">
+              Live Tracker (Frame {safeIdx + 1})
+            </h5>
+            <div className="grid grid-cols-2 gap-2 text-[10px]">
+              <div>
+                <p className="text-gray-400 font-medium">Coordinates X, Y</p>
+                <p className="font-bold font-mono text-gray-800 dark:text-gray-200">
+                  {currentPoint.x.toFixed(3)}, {currentPoint.y.toFixed(3)}
+                </p>
+              </div>
+              <div>
+                <p className="text-gray-400 font-medium">Session Time</p>
+                <p className="font-bold font-mono text-gray-800 dark:text-gray-200">
+                  {currentPoint.timestamp != null ? `${currentPoint.timestamp.toFixed(2)}s` : `${(safeIdx * 0.15).toFixed(2)}s`}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const LaptopMovementVisualizer = ({ movements, isDarkMode }) => {
+  const [activeStep, setActiveStep] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    setActiveStep(0);
+    setIsPlaying(false);
+  }, [movements]);
+
+  useEffect(() => {
+    if (isPlaying) {
+      const intervalTime = Math.max(200, 1000 / playbackSpeed);
+      timerRef.current = setInterval(() => {
+        setActiveStep((prev) => {
+          if (prev >= movements.length - 1) {
+            setIsPlaying(false);
+            return prev;
+          }
+          return prev + 1;
+        });
+      }, intervalTime);
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isPlaying, movements, playbackSpeed]);
+
+  if (!movements || movements.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-400">
+        No transition vector data recorded for this session.
+      </div>
+    );
+  }
+
+  const points = [];
+  movements.forEach((m) => {
+    if (m.fromX && m.fromY && m.fromKey) points.push({ x: m.fromX, y: m.fromY, label: m.fromKey });
+    if (m.toX && m.toY && m.toKey) points.push({ x: m.toX, y: m.toY, label: m.toKey });
+  });
+
+  const uniqueKeysMap = {};
+  points.forEach(p => {
+    if (p.label) uniqueKeysMap[p.label] = p;
+  });
+  const uniqueKeys = Object.values(uniqueKeysMap);
+
+  if (uniqueKeys.length === 0) {
+    return (
+      <div className="text-center py-8 text-gray-400">
+        No valid coordinates found in movement logs.
+      </div>
+    );
+  }
+
+  const xCoords = uniqueKeys.map(p => p.x);
+  const yCoords = uniqueKeys.map(p => p.y);
+  const minX = Math.min(...xCoords);
+  const maxX = Math.max(...xCoords);
+  const minY = Math.min(...yCoords);
+  const maxY = Math.max(...yCoords);
+
+  const normX = (x) => {
+    if (maxX === minX) return 50;
+    return 15 + ((x - minX) / (maxX - minX)) * 70;
+  };
+
+  const normY = (y) => {
+    if (maxY === minY) return 25;
+    return 20 + ((y - minY) / (maxY - minY)) * 10;
+  };
+
+  const currentMove = movements[activeStep];
+
+  return (
+    <div className="space-y-4">
+      <div className="relative w-full aspect-[2.5/1] bg-gray-900 rounded-2xl border border-gray-800 shadow-inner overflow-hidden">
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:5%_10%] opacity-20"></div>
+        
+        <svg viewBox="0 0 100 50" className="w-full h-full p-4">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="15" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 2 L 10 5 L 0 8 z" fill="#3b82f6" />
+            </marker>
+            <marker id="arrow-active" viewBox="0 0 10 10" refX="15" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 2 L 10 5 L 0 8 z" fill="#ef4444" />
+            </marker>
+          </defs>
+
+          {movements.map((m, idx) => {
+            if (!m.fromX || !m.toX) return null;
+            return (
+              <line
+                key={`line-${idx}`}
+                x1={normX(m.fromX)}
+                y1={normY(m.fromY)}
+                x2={normX(m.toX)}
+                y2={normY(m.toY)}
+                stroke="#374151"
+                strokeWidth="0.4"
+                strokeDasharray="1,1"
+              />
+            );
+          })}
+
+          {currentMove && currentMove.fromX && currentMove.toX && (
+            <line
+              x1={normX(currentMove.fromX)}
+              y1={normY(currentMove.fromY)}
+              x2={normX(currentMove.toX)}
+              y2={normY(currentMove.toY)}
+              stroke="#EF4444"
+              strokeWidth="1.2"
+              markerEnd="url(#arrow-active)"
+              className="transition-all duration-300"
+            />
+          )}
+
+          {uniqueKeys.map((k) => {
+            const isActive = currentMove && (currentMove.fromKey === k.label || currentMove.toKey === k.label);
+            const isToKey = currentMove && currentMove.toKey === k.label;
+            return (
+              <g key={k.label} transform={`translate(${normX(k.x)}, ${normY(k.y)})`}>
+                <circle
+                  r="3.5"
+                  fill={isToKey ? "#EF4444" : isActive ? "#3B82F6" : "#1F2937"}
+                  stroke="#fff"
+                  strokeWidth="0.5"
+                  className="transition-colors duration-200"
+                />
+                <text
+                  textAnchor="middle"
+                  dy="0.8"
+                  fontSize="2.5"
+                  fontWeight="bold"
+                  fill="#fff"
+                >
+                  {k.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+
+        {currentMove && (
+          <div className="absolute bottom-3 left-3 right-3 flex justify-between bg-black/80 backdrop-blur-sm border border-gray-800 p-2.5 rounded-xl text-white text-[10px] font-mono">
+            <div>
+              <span className="text-gray-400">Step:</span> {activeStep + 1} / {movements.length}
+            </div>
+            <div>
+              <span className="text-gray-400">Move:</span> {currentMove.fromKey} ➔ {currentMove.toKey}
+            </div>
+            <div>
+              <span className="text-gray-400">Dist:</span> {currentMove.distance} px
+            </div>
+            <div>
+              <span className="text-gray-400">Vector:</span> ({currentMove.dx}, {currentMove.dy})
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setIsPlaying(!isPlaying)}
+          className={`px-3 py-1.5 text-white font-bold text-xs rounded-xl transition-all active:scale-95 ${
+            isPlaying ? "bg-amber-500 hover:bg-amber-600" : "bg-primary-500 hover:bg-primary-600"
+          }`}
+        >
+          {isPlaying ? "Pause" : "Play Path"}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setIsPlaying(false); setActiveStep(0); }}
+          className="px-3 py-1.5 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-bold text-xs rounded-xl transition-all active:scale-95 border dark:border-gray-600"
+        >
+          Reset
+        </button>
+
+        <input
+          type="range"
+          min="0"
+          max={movements.length - 1}
+          value={activeStep}
+          onChange={(e) => { setIsPlaying(false); setActiveStep(parseInt(e.target.value)); }}
+          className="flex-1 h-1 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-primary-500"
+        />
+
+        <select
+          value={playbackSpeed}
+          onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+          className="px-2 py-1 text-xs font-bold bg-gray-100 dark:bg-gray-700 border dark:border-gray-600 rounded-lg outline-none cursor-pointer dark:text-white"
+        >
+          <option value="0.5">0.5x</option>
+          <option value="1">1.0x</option>
+          <option value="2">2.0x</option>
+        </select>
+      </div>
+    </div>
+  );
+};
+
+const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
+  const mode = session?.mode || "laptop";
+  const fingerTimeouts = session?.fingerTimeouts || { thumb: 5, index: 5, middle: 5, ring: 5, pinky: 5 };
+  const laptopMovements = session?.laptopMovements || [];
+  const mobileMovements = session?.mobileMovements || [];
+
+  if (mode === "laptop") {
+    const totalDistance = laptopMovements.reduce((sum, m) => sum + (m.distance || 0), 0);
+    const avgDistance = laptopMovements.length > 0 ? totalDistance / laptopMovements.length : 0;
+
+    return (
+      <div className="space-y-6 mt-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+            <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Total Pixel Distance Moved</p>
+            <p className="text-3xl font-black text-primary-600 dark:text-primary-400">
+              {totalDistance.toFixed(1)} px
+            </p>
+            <p className="text-xs text-gray-400 mt-1">Sum of physical movement deltas between keys</p>
+          </div>
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+            <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Avg Transition Distance</p>
+            <p className="text-3xl font-black text-secondary-600 dark:text-secondary-400">
+              {avgDistance.toFixed(1)} px
+            </p>
+            <p className="text-xs text-gray-400 mt-1">Average pixel travel per key response</p>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+          <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Wrist/Arm Movement Vector Trajectory</h3>
+          <p className="text-xs text-gray-400 mb-4">Sequential coordinate path mapping response targets in absolute pixel coordinates.</p>
+          <LaptopMovementVisualizer movements={laptopMovements} isDarkMode={isDarkMode} />
+        </div>
+      </div>
+    );
+  } else {
+    const fingerKeys = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+    const fingerImages = { thumb: thumbImage, index: indexImage, middle: middleImage, ring: ringImage, pinky: pinkyImage };
+    const fingerNames = { thumb: "Thumb", index: "Index", middle: "Middle", ring: "Ring", pinky: "Pinky" };
+
+    const fingerStats = fingerKeys.map(finger => {
+      const movements = mobileMovements.filter(m => m.expectedFinger === finger);
+      const total = movements.length;
+      const correct = movements.filter(m => m.correct === 1).length;
+      const incorrect = movements.filter(m => m.correct === -1).length;
+      
+      const correctMovements = movements.filter(m => m.correct === 1 && m.responsetime > 0);
+      const avgResponse = correctMovements.length > 0
+        ? correctMovements.reduce((sum, m) => sum + m.responsetime, 0) / correctMovements.length
+        : 0;
+        
+      const accuracy = (correct + incorrect) > 0
+        ? (correct / (correct + incorrect)) * 100
+        : 0;
+
+      return {
+        finger,
+        name: fingerNames[finger],
+        image: fingerImages[finger],
+        total,
+        correct,
+        incorrect,
+        avgResponse,
+        accuracy,
+        timeout: fingerTimeouts[finger] || 5
+      };
+    }).filter(f => f.total > 0);
+
+    return (
+      <div className="space-y-6 mt-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+          {fingerStats.map(f => (
+            <div key={f.finger} className="bg-white dark:bg-slate-800 rounded-xl p-5 border border-slate-200 dark:border-slate-700 shadow-sm relative overflow-hidden">
+              <div className="absolute -right-4 -top-4 w-20 h-20 opacity-10 grayscale hover:grayscale-0 transition-all duration-300 pointer-events-none">
+                 <img src={f.image} alt={f.name} className="w-full h-full object-contain" />
+              </div>
+              <div className="flex items-center justify-between mb-4 relative z-10">
+                <div className="w-10 h-10 p-1 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-600 rounded-lg flex items-center justify-center">
+                  <img src={f.image} alt={f.name} className="w-full h-full object-contain" />
+                </div>
+                <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 rounded-lg text-xs font-semibold">
+                  Limit: {f.timeout}s
+                </span>
+              </div>
+              <h4 className="font-bold text-sm text-gray-800 dark:text-white mb-1">{f.name} Finger</h4>
+              <p className="text-[11px] text-gray-400 mb-3">{f.correct} of {f.total} correct</p>
+              
+              <div className="space-y-2 pt-2 border-t dark:border-gray-700">
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Response</span>
+                  <span className="font-bold text-primary-600 dark:text-primary-400">{f.avgResponse.toFixed(2)}s</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-gray-400">Accuracy</span>
+                  <span className="font-bold text-green-600 dark:text-green-400">{f.accuracy.toFixed(0)}%</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+          <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Finger Dexterity Profile</h3>
+          <p className="text-xs text-gray-400 mb-4">Response times and accuracy compared across active fingers.</p>
+          <div className="h-64">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={fingerStats} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#1F2937" : "#F3F4F6"} />
+                <XAxis dataKey="name" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
+                <YAxis yAxisId="left" orientation="left" unit="s" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
+                <YAxis yAxisId="right" orientation="right" unit="%" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
+                <Tooltip contentStyle={{ backgroundColor: isDarkMode ? "#111827" : "#FFFFFF", borderColor: isDarkMode ? "#374151" : "#E5E7EB", borderRadius: "8px" }} />
+                <Legend />
+                <Bar yAxisId="left" dataKey="avgResponse" fill="#3B82F6" name="Avg Response (s)" radius={[4, 4, 0, 0]} />
+                <Bar yAxisId="right" dataKey="accuracy" fill="#10B981" name="Accuracy (%)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      </div>
+    );
+  }
+};
+
+const GAMES_LIST = [
+  {
+    type: "type1",
+    name: "Piano Reaction",
+    path: "/piano-reaction",
+    desc: "Tests and improves cognitive reaction speeds by tapping highlighted piano keys in response to stimuli.",
+    clinicalFocus: "Cognitive processing speed, manual dexterity, and hand-eye coordination.",
+    hasCoordinates: false,
+    icon: "🎹",
+    color: "from-violet-700 to-indigo-800",
+    accent: "#7C3AED",
+  },
+  {
+    type: "board_drawing",
+    name: "Board Drawing",
+    path: "/board-drawing",
+    desc: "Traces complex board paths to evaluate distal hand movements, precision, and tremor control.",
+    clinicalFocus: "Fine motor control, hand tremor reduction, and continuous movement precision.",
+    hasCoordinates: false,
+    icon: "✏️",
+    color: "from-blue-700 to-cyan-800",
+    accent: "#2563EB",
+  },
+  {
+    type: "fruit_basket",
+    name: "Fruit Fetch",
+    path: "/fruit-basket",
+    desc: "Grasp and move falling fruits into a basket using full arm gestures to improve range of motion.",
+    clinicalFocus: "Gross motor coordination, shoulder/elbow articulation, and spatial reaching velocity.",
+    hasCoordinates: true,
+    icon: "🍎",
+    color: "from-orange-600 to-amber-700",
+    accent: "#EA580C",
+  },
+];
 
 const PatientAnalytics = () => {
   const { isDarkMode } = useAuth();
@@ -37,6 +708,10 @@ const PatientAnalytics = () => {
   const [showLevelSpanModal, setShowLevelSpanModal] = useState(false);
   const [newLevelSpan, setNewLevelSpan] = useState(5);
   const [isMounted, setIsMounted] = useState(false);
+
+  const [selectedGameType, setSelectedGameType] = useState("type1");
+  const [selectedSession, setSelectedSession] = useState(0);
+  const [pianoSubTab, setPianoSubTab] = useState("finger"); // "finger" or "ankle"
 
   useEffect(() => {
     setIsMounted(true);
@@ -70,40 +745,114 @@ const PatientAnalytics = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div
-        className={`min-h-screen flex items-center justify-center ${isDarkMode ? "bg-black" : "bg-gray-50"}`}
-      >
-        <div className="text-primary-500 text-xl animate-pulse font-bold">
-          Loading analytics...
-        </div>
-      </div>
-    );
-  }
+  const selectedGame = useMemo(() => {
+    return GAMES_LIST.find(g => g.type === selectedGameType) || GAMES_LIST[0];
+  }, [selectedGameType]);
 
-  if (!analytics) {
-    return (
-      <div
-        className={`min-h-screen flex items-center justify-center ${isDarkMode ? "bg-black" : "bg-gray-50"}`}
-      >
-        <div className="text-gray-500 text-xl font-bold">No data available</div>
-      </div>
-    );
-  }
+  const activeGameData = useMemo(() => {
+    if (!analytics?.games) return null;
+    return analytics.games.find(g => g.type === selectedGameType) || null;
+  }, [analytics, selectedGameType]);
 
-  // Prepare data for visualizations
-  const sessions = analytics.sessions || [];
+  const sessions = useMemo(() => {
+    const rawSessions = activeGameData?.sessions || [];
+    if (selectedGameType === "type1") {
+      return rawSessions.filter((s) => {
+        const gameType = s.gameType || s.session?.gameType;
+        const mode = s.mode || s.session?.mode;
+        const hasCoords = (s.coordinates && s.coordinates.length > 0) || (s.session?.coordinates && s.session?.coordinates.length > 0);
+        const isWrist = gameType === "piano_ankle" || mode === "piano_finger" || hasCoords;
 
-  // 1. Response Time Scatter Plot Data (from latest session)
-  const latestSession =
-    sessions.length > 0 ? sessions[sessions.length - 1] : null;
-  const scatterData =
-    latestSession?.play?.map((entry, index) => ({
+        if (pianoSubTab === "finger") {
+          return !isWrist;
+        } else {
+          return isWrist;
+        }
+      });
+    }
+    return rawSessions;
+  }, [activeGameData, selectedGameType, pianoSubTab]);
+
+  const overallStats = useMemo(() => {
+    if (selectedGameType === "type1") {
+      let totalCorrect = 0;
+      let totalIncorrect = 0;
+      let totalNotDone = 0;
+      let totalResponseTime = 0;
+      let validResponseCount = 0;
+      let totalScore = 0;
+
+      sessions.forEach(session => {
+        totalScore += session.sessionScore || 0;
+        const playList = session.play || session.session?.play || [];
+        playList.forEach(entry => {
+          if (entry.correct === 1) {
+            totalCorrect++;
+            if (entry.responsetime !== -1 && entry.responsetime !== undefined) {
+              totalResponseTime += entry.responsetime;
+              validResponseCount++;
+            }
+          } else if (entry.correct === -1) {
+            totalIncorrect++;
+            if (entry.responsetime !== -1 && entry.responsetime !== undefined) {
+              totalResponseTime += entry.responsetime;
+              validResponseCount++;
+            }
+          } else if (entry.correct === 0) {
+            totalNotDone++;
+          }
+        });
+      });
+
+      const avgResponseTime = validResponseCount > 0 
+        ? parseFloat((totalResponseTime / validResponseCount).toFixed(2))
+        : 0;
+
+      const accuracy = (totalCorrect + totalIncorrect) > 0
+        ? parseFloat(((totalCorrect / (totalCorrect + totalIncorrect)) * 100).toFixed(2))
+        : 0;
+
+      return {
+        totalSessions: sessions.length,
+        totalScore,
+        totalCorrect,
+        totalIncorrect,
+        totalNotDone,
+        avgResponseTime,
+        accuracy
+      };
+    }
+
+    return activeGameData?.overallStats || {
+      totalSessions: 0,
+      totalScore: 0,
+      totalCorrect: 0,
+      totalIncorrect: 0,
+      totalNotDone: 0,
+      avgResponseTime: 0,
+      accuracy: 0
+    };
+  }, [activeGameData, selectedGameType, sessions]);
+
+  const reversedSessions = useMemo(() => [...sessions].reverse(), [sessions]);
+  const selectedSessionData = useMemo(() => reversedSessions[selectedSession], [reversedSessions, selectedSession]);
+  const sessionObject = useMemo(() => selectedSessionData?.session || selectedSessionData, [selectedSessionData]);
+  const selectedCoordinates = useMemo(() => sessionObject?.coordinates || [], [sessionObject]);
+  const selectedBoardDrawingAttempts = useMemo(
+    () =>
+      sessionObject?.boardDrawingAttempts ||
+      selectedSessionData?.boardDrawingAttempts ||
+      selectedSessionData?.session?.boardDrawingAttempts ||
+      [],
+    [sessionObject, selectedSessionData],
+  );
+
+  const scatterData = useMemo(() => {
+    return selectedSessionData?.play?.map((entry, index) => ({
       attempt: index + 1,
       responsetime:
         entry.responsetime === -1
-          ? analytics.user.currentlevelspan + 0.5
+          ? analytics?.user?.currentlevelspan + 0.5
           : entry.responsetime,
       actualTime: entry.responsetime,
       correct: entry.correct,
@@ -114,76 +863,79 @@ const PatientAnalytics = () => {
             ? "#ef4444"
             : "#f59e0b",
     })) || [];
+  }, [selectedSessionData, analytics]);
 
-  // 2. Session Performance Data
-  const sessionPerformanceData = sessions.map((session, index) => {
-    const correct = session.play.filter((p) => p.correct === 1).length;
-    const incorrect = session.play.filter((p) => p.correct === -1).length;
-    const notDone = session.play.filter((p) => p.correct === 0).length;
+  const sessionPerformanceData = useMemo(() => {
+    return sessions.map((session, index) => {
+      const correct = session.play?.filter((p) => p.correct === 1).length || 0;
+      const incorrect = session.play?.filter((p) => p.correct === -1).length || 0;
+      const notDone = session.play?.filter((p) => p.correct === 0).length || 0;
 
-    return {
-      name: `Session ${index + 1}`,
-      date: new Date(session.time).toLocaleDateString(),
-      correct,
-      incorrect,
-      notDone,
-      total: session.play.length,
-    };
-  });
+      return {
+        name: `S${index + 1}`,
+        date: new Date(session.time).toLocaleDateString(),
+        correct,
+        incorrect,
+        notDone,
+        total: session.play?.length || 0,
+      };
+    });
+  }, [sessions]);
 
-  // 3. Overall Distribution Pie Data
-  const pieData = [
-    {
-      name: "Correct",
-      value: analytics.overallStats.totalCorrect,
-      color: "#10b981",
-    },
-    {
-      name: "Incorrect",
-      value: analytics.overallStats.totalIncorrect,
-      color: "#ef4444",
-    },
-    {
-      name: "Not Done",
-      value: analytics.overallStats.totalNotDone,
-      color: "#f59e0b",
-    },
-  ];
+  const pieData = useMemo(() => {
+    return [
+      {
+        name: "Correct",
+        value: overallStats.totalCorrect,
+        color: "#10b981",
+      },
+      {
+        name: "Incorrect",
+        value: overallStats.totalIncorrect,
+        color: "#ef4444",
+      },
+      {
+        name: "Not Done",
+        value: overallStats.totalNotDone,
+        color: "#f59e0b",
+      },
+    ];
+  }, [overallStats]);
 
-  // 4. Average Response Time Trend
-  const avgResponseTimeTrend = sessions.map((session, index) => {
-    const validResponses = session.play.filter((p) => p.responsetime !== -1);
-    const avgTime =
-      validResponses.length > 0
-        ? (
-            validResponses.reduce((sum, p) => sum + p.responsetime, 0) /
-            validResponses.length
-          ).toFixed(2)
-        : 0;
+  const avgResponseTimeTrend = useMemo(() => {
+    return sessions.map((session, index) => {
+      const validResponses = session.play?.filter((p) => p.responsetime !== -1) || [];
+      const avgTime =
+        validResponses.length > 0
+          ? (
+              validResponses.reduce((sum, p) => sum + p.responsetime, 0) /
+              validResponses.length
+            ).toFixed(2)
+          : 0;
 
-    return {
-      session: `S${index + 1}`,
-      avgResponseTime: parseFloat(avgTime),
-      levelspan: session.levelspan,
-    };
-  });
+      return {
+        session: `S${index + 1}`,
+        avgResponseTime: parseFloat(avgTime),
+        levelspan: session.levelspan,
+      };
+    });
+  }, [sessions]);
 
-  // Custom tooltip for scatter plot
   const CustomScatterTooltip = ({ active, payload }) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       return (
-        <div className="bg-white dark:bg-gray-900 p-3 rounded-lg shadow-xl border dark:border-gray-800">
+        <div className="bg-white dark:bg-gray-900 p-3 rounded-lg shadow-xl border dark:border-gray-800 text-xs">
           <p className="font-bold text-gray-800 dark:text-gray-100 mb-1">
             Attempt #{data.attempt}
           </p>
-          <p className="text-sm">
+          <p className="text-gray-600 dark:text-gray-400">
             Time:{" "}
             <span className="font-semibold text-blue-600">
               {data.actualTime === -1 ? "Exceeded" : `${data.actualTime}s`}
             </span>
           </p>
-          <p className="text-sm">
+          <p className="text-gray-600 dark:text-gray-400">
             Status:{" "}
             <span
               className={`font-semibold ${
@@ -207,13 +959,35 @@ const PatientAnalytics = () => {
     return null;
   };
 
+  if (loading) {
+    return (
+      <div
+        className={`min-h-screen flex items-center justify-center ${isDarkMode ? "bg-black" : "bg-gray-50"}`}
+      >
+        <div className="text-primary-500 text-xl animate-pulse font-bold">
+          Loading analytics...
+        </div>
+      </div>
+    );
+  }
+
+  if (!analytics) {
+    return (
+      <div
+        className={`min-h-screen flex items-center justify-center ${isDarkMode ? "bg-black" : "bg-gray-50"}`}
+      >
+        <div className="text-gray-500 text-xl font-bold">No data available</div>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`min-h-screen p-4 md:p-6 transition-colors duration-500 ${isDarkMode ? "bg-black text-white" : "bg-gray-50 text-gray-800"}`}
     >
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 mb-8 border dark:border-gray-800">
+        <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 mb-6 border dark:border-gray-800">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
             <button
               onClick={() => navigate("/doctor/dashboard")}
@@ -239,343 +1013,486 @@ const PatientAnalytics = () => {
             </p>
             <div className="inline-flex items-center gap-2 px-4 py-2 bg-primary-50 dark:bg-primary-900/20 rounded-xl">
               <span className="text-sm font-bold text-primary-600 dark:text-primary-400">
-                Level Span: {analytics.user.currentlevelspan} seconds
+                Default Level Span: {analytics.user.currentlevelspan} seconds
               </span>
             </div>
           </div>
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <div className="bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl p-6 text-white shadow-lg">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-primary-100">Total Sessions</p>
-              <TrendingUp className="w-6 h-6" />
-            </div>
-            <p className="text-4xl font-bold">
-              {analytics.overallStats.totalSessions}
-            </p>
-          </div>
-
-          <div className="bg-gradient-to-br from-success-500 to-success-600 rounded-xl p-6 text-white shadow-lg">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-green-100">Accuracy</p>
-              <Target className="w-6 h-6" />
-            </div>
-            <p className="text-4xl font-bold">
-              {analytics.overallStats.accuracy.toFixed(1)}%
-            </p>
-            <p className="text-xs text-green-100 mt-1">
-              {analytics.overallStats.totalCorrect} correct /{" "}
-              {analytics.overallStats.totalCorrect +
-                analytics.overallStats.totalIncorrect}{" "}
-              attempted
-            </p>
-          </div>
-
-          <div className="bg-gradient-to-br from-warning-500 to-warning-600 rounded-xl p-6 text-white shadow-lg">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-yellow-100">Avg Response</p>
-              <Clock className="w-6 h-6" />
-            </div>
-            <p className="text-4xl font-bold">
-              {analytics.overallStats.avgResponseTime}s
-            </p>
-            <p className="text-xs text-yellow-100 mt-1">Valid responses only</p>
-          </div>
-
-          <div className="bg-gradient-to-br from-secondary-500 to-secondary-600 rounded-xl p-6 text-white shadow-lg">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-purple-100">Total Score</p>
-              <Zap className="w-6 h-6" />
-            </div>
-            <p className="text-4xl font-bold">{analytics.user.totalScore}</p>
-            <p className="text-xs text-purple-100 mt-1">
-              Level {analytics.user.level}
-            </p>
-          </div>
+        {/* Game Selector Tabs */}
+        <div className="flex flex-wrap gap-2 bg-white dark:bg-gray-900 p-3 rounded-2xl border border-gray-100 dark:border-gray-800 mb-6 shadow-sm">
+          {GAMES_LIST.map(g => {
+            const gameData = analytics.games?.find(game => game.type === g.type);
+            const playCount = gameData?.overallStats?.totalSessions || 0;
+            return (
+              <button
+                key={g.type}
+                onClick={() => { setSelectedGameType(g.type); setSelectedSession(0); }}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                  selectedGameType === g.type
+                    ? 'bg-gray-900 text-white shadow-md dark:bg-white dark:text-gray-900'
+                    : 'bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                }`}
+              >
+                <span className="text-base">{g.icon}</span>
+                <span>{g.name}</span>
+                {playCount > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-full text-[9px] font-bold">
+                    {playCount}
+                  </span>
+                )}
+                {selectedGameType === g.type && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
-        {/* Charts Row 1: Response Time Scatter + Session Performance */}
-        <div className="grid lg:grid-cols-2 gap-8 mb-8">
-          {/* Response Time Scatter Plot */}
-          <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800">
-            <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
-              Response Time Analysis
-            </h2>
-            <p className="text-sm text-gray-600 mb-4">
-              Latest Session - Individual response times
-              <span className="block text-xs text-gray-500 mt-1">
-                Green = Correct, Red = Incorrect, Yellow = Not Done (exceeded{" "}
-                {analytics.user.currentlevelspan}s)
-              </span>
-            </p>
-            {scatterData.length > 0 ? (
-              <div className="h-[300px]">
-                {isMounted && (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ScatterChart
-                      margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis
-                        type="number"
-                        dataKey="attempt"
-                        name="Attempt"
-                        label={{
-                          value: "Attempt Number",
-                          position: "insideBottom",
-                          offset: -10,
-                        }}
-                      />
-                      <YAxis
-                        type="number"
-                        dataKey="responsetime"
-                        name="Time"
-                        label={{
-                          value: "Response Time (s)",
-                          angle: -90,
-                          position: "insideLeft",
-                        }}
-                        domain={[0, analytics.user.currentlevelspan + 1]}
-                      />
-                      <Tooltip content={<CustomScatterTooltip />} />
-                      <Scatter data={scatterData} fill="#8884d8">
-                        {scatterData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Scatter>
-                    </ScatterChart>
-                  </ResponsiveContainer>
+        {/* Sub-tab Selector for Piano Reaction Game */}
+        {selectedGameType === "type1" && (
+          <div className="flex gap-2 p-1.5 bg-gray-100/80 dark:bg-gray-950/40 backdrop-blur-md rounded-2xl border border-gray-200/50 dark:border-gray-800/50 mb-6 max-w-md">
+            <button
+              onClick={() => { setPianoSubTab("finger"); setSelectedSession(0); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all duration-300 ${
+                pianoSubTab === "finger"
+                  ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/10'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+              }`}
+            >
+              <span>🖐️</span>
+              <span>Finger Dexterity</span>
+            </button>
+            <button
+              onClick={() => { setPianoSubTab("ankle"); setSelectedSession(0); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all duration-300 ${
+                pianoSubTab === "ankle"
+                  ? 'bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-md shadow-indigo-500/10'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+              }`}
+            >
+              <span>⌚</span>
+              <span>Wrist Movement</span>
+            </button>
+          </div>
+        )}
+
+        {sessions.length === 0 ? (
+          <div className="text-center py-24 bg-white dark:bg-gray-900 rounded-xl border border-gray-100 dark:border-gray-800 shadow-sm">
+            <div className="text-7xl mb-4">{selectedGame?.icon}</div>
+            <p className="text-xl font-bold text-gray-400 mb-2">No sessions recorded yet</p>
+            <p className="text-gray-500 max-w-sm mx-auto">This patient has not played {selectedGame?.name} yet.</p>
+          </div>
+        ) : (
+          <>
+            {/* Stats Cards */}
+            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <div className="bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl p-6 text-white shadow-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-primary-100">Total Sessions</p>
+                  <TrendingUp className="w-6 h-6" />
+                </div>
+                <p className="text-4xl font-bold">
+                  {overallStats.totalSessions}
+                </p>
+              </div>
+
+              <div className="bg-gradient-to-br from-success-500 to-success-600 rounded-xl p-6 text-white shadow-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-green-100">Accuracy</p>
+                  <Target className="w-6 h-6" />
+                </div>
+                <p className="text-4xl font-bold">
+                  {overallStats.accuracy.toFixed(1)}%
+                </p>
+                <p className="text-xs text-green-100 mt-1">
+                  {overallStats.totalCorrect} correct /{" "}
+                  {overallStats.totalCorrect + overallStats.totalIncorrect} attempted
+                </p>
+              </div>
+
+              <div className="bg-gradient-to-br from-warning-500 to-warning-600 rounded-xl p-6 text-white shadow-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-yellow-100">Avg Response</p>
+                  <Clock className="w-6 h-6" />
+                </div>
+                <p className="text-4xl font-bold">
+                  {overallStats.avgResponseTime}s
+                </p>
+                <p className="text-xs text-yellow-100 mt-1">Valid responses only</p>
+              </div>
+
+              <div className="bg-gradient-to-br from-secondary-500 to-secondary-600 rounded-xl p-6 text-white shadow-lg">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-purple-100">Session Points</p>
+                  <Zap className="w-6 h-6" />
+                </div>
+                <p className="text-4xl font-bold">{overallStats.totalScore}</p>
+                <p className="text-xs text-purple-100 mt-1">
+                  Cumulative Game Score
+                </p>
+              </div>
+            </div>
+
+            {/* Charts Row 1 */}
+            <div className="grid lg:grid-cols-2 gap-8 mb-8">
+              {/* Scatter Plot */}
+              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800">
+                <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
+                  Response Time Analysis
+                </h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Selected Session {reversedSessions.length - selectedSession} - Individual response times
+                  <span className="block text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Green = Correct, Red = Incorrect, Yellow = Not Done (exceeded{" "}
+                    {selectedSessionData?.levelspan || analytics.user.currentlevelspan}s)
+                  </span>
+                </p>
+                {scatterData.length > 0 ? (
+                  <div className="h-[300px]">
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ScatterChart
+                          margin={{ top: 20, right: 20, bottom: 20, left: 20 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis
+                            type="number"
+                            dataKey="attempt"
+                            name="Attempt"
+                            label={{
+                              value: "Attempt Number",
+                              position: "insideBottom",
+                              offset: -10,
+                            }}
+                          />
+                          <YAxis
+                            type="number"
+                            dataKey="responsetime"
+                            name="Time"
+                            label={{
+                              value: "Response Time (s)",
+                              angle: -90,
+                              position: "insideLeft",
+                            }}
+                            domain={[0, (selectedSessionData?.levelspan || analytics.user.currentlevelspan) + 1]}
+                          />
+                          <Tooltip content={<CustomScatterTooltip />} />
+                          <Scatter data={scatterData} fill="#8884d8">
+                            {scatterData.map((entry, index) => (
+                              <Cell key={`cell-${index}`} fill={entry.color} />
+                            ))}
+                          </Scatter>
+                        </ScatterChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                ) : (
+                  <div className="h-[300px] flex items-center justify-center text-gray-400">
+                    No attempt data available for this session
+                  </div>
                 )}
               </div>
-            ) : (
-              <div className="h-64 flex items-center justify-center text-gray-400">
-                No session data available
-              </div>
-            )}
-          </div>
 
-          {/* Session Performance Bar Chart */}
-          <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800">
-            <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
-              Session Performance
-            </h2>
-            <p className="text-sm text-gray-600 mb-4">
-              Correct vs Incorrect vs Not Done per session
-            </p>
-            {sessionPerformanceData.length > 0 ? (
-              <div className="h-[300px]">
-                {isMounted && (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={sessionPerformanceData}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="name" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="correct" fill="#10b981" name="Correct" />
-                      <Bar
-                        dataKey="incorrect"
-                        fill="#ef4444"
-                        name="Incorrect"
-                      />
-                      <Bar dataKey="notDone" fill="#f59e0b" name="Not Done" />
-                    </BarChart>
-                  </ResponsiveContainer>
+              {/* Bar Chart */}
+              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800">
+                <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
+                  Session Performance
+                </h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Correct vs Incorrect vs Not Done per session
+                </p>
+                {sessionPerformanceData.length > 0 ? (
+                  <div className="h-[300px]">
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={sessionPerformanceData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="name" />
+                          <YAxis />
+                          <Tooltip />
+                          <Legend />
+                          <Bar dataKey="correct" fill="#10b981" name="Correct" />
+                          <Bar
+                            dataKey="incorrect"
+                            fill="#ef4444"
+                            name="Incorrect"
+                          />
+                          <Bar dataKey="notDone" fill="#f59e0b" name="Not Done" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                ) : (
+                  <div className="h-[300px] flex items-center justify-center text-gray-400">
+                    No session data available
+                  </div>
                 )}
               </div>
-            ) : (
-              <div className="h-64 flex items-center justify-center text-gray-400">
-                No session data available
-              </div>
-            )}
-          </div>
-        </div>
+            </div>
 
-        {/* Charts Row 2: Distribution Pie + Response Time Trend */}
-        <div className="grid lg:grid-cols-2 gap-8 mb-8">
-          {/* Overall Distribution Pie Chart */}
-          <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800">
-            <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
-              Overall Distribution
-            </h2>
-            <p className="text-sm text-gray-600 mb-4">
-              All attempts across all sessions
-            </p>
-            <div className="h-[300px]">
-              {isMounted && (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={pieData}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name, percent, value }) =>
-                        `${name}: ${value} (${(percent * 100).toFixed(0)}%)`
-                      }
-                      outerRadius={100}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {pieData.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
+            {/* Charts Row 2 */}
+            <div className="grid lg:grid-cols-2 gap-8 mb-8">
+              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800">
+                <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
+                  Overall Distribution
+                </h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  All attempts across all sessions
+                </p>
+                <div className="h-[300px]">
+                  {isMounted && (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={pieData}
+                          cx="50%"
+                          cy="50%"
+                          labelLine={false}
+                          label={({ name, percent, value }) =>
+                            `${name}: ${value} (${(percent * 100).toFixed(0)}%)`
+                          }
+                          outerRadius={100}
+                          fill="#8884d8"
+                          dataKey="value"
+                        >
+                          {pieData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800">
+                <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
+                  Response Time Trend
+                </h2>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Average response time per session
+                </p>
+                {avgResponseTimeTrend.length > 0 ? (
+                  <div className="h-[300px]">
+                    {isMounted && (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={avgResponseTimeTrend}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="session" />
+                          <YAxis />
+                          <Tooltip />
+                          <Legend />
+                          <Line
+                            type="monotone"
+                            dataKey="avgResponseTime"
+                            stroke="#667eea"
+                            strokeWidth={3}
+                            dot={{ fill: "#667eea", r: 6 }}
+                            name="Avg Response Time (s)"
+                          />
+                          <Line
+                            type="monotone"
+                            dataKey="levelspan"
+                            stroke="#f59e0b"
+                            strokeWidth={2}
+                            strokeDasharray="5 5"
+                            dot={{ fill: "#f59e0b", r: 4 }}
+                            name="Level Span (s)"
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    )}
+                  </div>
+                ) : (
+                  <div className="h-[300px] flex items-center justify-center text-gray-400">
+                    No trend data available
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Detailed Session Replay and Analysis */}
+            <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800 mb-8">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-6 border-b dark:border-gray-800 pb-4">
+                <div>
+                  <h2 className="text-2xl font-black text-gray-800 dark:text-white tracking-tight">
+                    Detailed Session Analysis
+                  </h2>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5 font-medium">
+                    Select a session below to view granular telemetry, paths, and response metrics.
+                  </p>
+                </div>
+                {selectedSessionData && (
+                  <div className="flex gap-2 text-xs">
+                    <span className="px-2.5 py-1 bg-green-50 dark:bg-green-950/30 text-green-600 dark:text-green-400 font-bold rounded-full border dark:border-green-900/50">
+                      ✓ {selectedSessionData.play?.filter(p => p.correct === 1).length || 0} correct
+                    </span>
+                    <span className="px-2.5 py-1 bg-red-50 dark:bg-red-950/30 text-red-600 dark:text-red-400 font-bold rounded-full border dark:border-red-900/50">
+                      ✗ {selectedSessionData.play?.filter(p => p.correct === -1).length || 0} wrong
+                    </span>
+                    <span className="px-2.5 py-1 bg-yellow-50 dark:bg-yellow-950/30 text-yellow-600 dark:text-yellow-400 font-bold rounded-full border dark:border-yellow-900/50">
+                      ⭐ {selectedSessionData.sessionScore || 0} score
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Session Selector Pills */}
+              <div className="flex flex-wrap gap-2 mb-6">
+                {reversedSessions.map((s, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedSession(i)}
+                    className={`text-xs font-bold px-3 py-1.5 rounded-xl transition-all border ${
+                      selectedSession === i
+                        ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-gray-900 dark:border-white shadow-md font-black'
+                        : 'bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 border-gray-200 dark:border-gray-850'
+                    }`}
+                  >
+                    Session {reversedSessions.length - i} · {new Date(s.time).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </button>
+                ))}
+              </div>
+
+              {selectedSessionData ? (
+                <div className="space-y-6">
+                  {selectedGameType === "board_drawing" && (
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-2">Board Drawing Trajectory Replay</h3>
+                      <BoardDrawingTrajectoryReplay attempts={selectedBoardDrawingAttempts} />
+                      <DrawingPerformancePanel userId={patientId} />
+                    </div>
+                  )}
+
+                  {selectedGameType !== "board_drawing" && (selectedGame?.hasCoordinates || (selectedGameType === "type1" && pianoSubTab === "ankle")) && selectedCoordinates.length > 0 && (
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-2">Hand/Cursor Movement Trajectory</h3>
+                      <CoordinateVisualizer coordinates={selectedCoordinates} />
+                    </div>
+                  )}
+
+                  {selectedGameType === "type1" && pianoSubTab === "finger" && (
+                    <div>
+                      <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-2">
+                        {sessionObject?.mode === 'mobile' ? 'Mobile Finger Dexterity Analytics' : 'Laptop Movement Analytics'}
+                      </h3>
+                      <PianoReactionGameAnalytics
+                        session={sessionObject}
+                        isDarkMode={isDarkMode}
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-10 text-gray-400">
+                  No session selected or available.
+                </div>
               )}
             </div>
-          </div>
 
-          {/* Average Response Time Trend */}
-          <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800">
-            <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-2 tracking-tight">
-              Response Time Trend
-            </h2>
-            <p className="text-sm text-gray-600 mb-4">
-              Average response time per session
-            </p>
-            {avgResponseTimeTrend.length > 0 ? (
-              <div className="h-[300px]">
-                {isMounted && (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={avgResponseTimeTrend}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="session" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="avgResponseTime"
-                        stroke="#667eea"
-                        strokeWidth={3}
-                        dot={{ fill: "#667eea", r: 6 }}
-                        name="Avg Response Time (s)"
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="levelspan"
-                        stroke="#f59e0b"
-                        strokeWidth={2}
-                        strokeDasharray="5 5"
-                        dot={{ fill: "#f59e0b", r: 4 }}
-                        name="Level Span (s)"
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
+            {/* Session History Table */}
+            <div className="bg-white dark:bg-gray-900 rounded-xl shadow-premium p-8 border dark:border-gray-800">
+              <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-6 tracking-tight">
+                Session History
+              </h2>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b-2 border-gray-100 dark:border-gray-800">
+                      <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
+                        Date
+                      </th>
+                      <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
+                        Level Span
+                      </th>
+                      <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
+                        Attempts
+                      </th>
+                      <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
+                        Correct
+                      </th>
+                      <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
+                        Incorrect
+                      </th>
+                      <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
+                        Not Done
+                      </th>
+                      <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
+                        Accuracy
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reversedSessions.map((session, index) => {
+                      const correct = session.play?.filter(
+                        (p) => p.correct === 1,
+                      ).length || 0;
+                      const incorrect = session.play?.filter(
+                        (p) => p.correct === -1,
+                      ).length || 0;
+                      const notDone = session.play?.filter(
+                        (p) => p.correct === 0,
+                      ).length || 0;
+                      const accuracy =
+                        correct + incorrect > 0
+                          ? ((correct / (correct + incorrect)) * 100).toFixed(1)
+                          : 0;
+
+                      return (
+                        <tr
+                          key={index}
+                          onClick={() => setSelectedSession(index)}
+                          className={`border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer ${
+                            selectedSession === index ? 'bg-primary-50/20 dark:bg-primary-950/25 font-semibold' : ''
+                          }`}
+                        >
+                          <td className="py-4 px-4 text-sm">
+                            {new Date(session.time).toLocaleString()}
+                          </td>
+                          <td className="py-4 px-4">
+                            <span className="px-3 py-1 bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-full text-xs font-bold">
+                              {session.levelspan}s
+                            </span>
+                          </td>
+                          <td className="py-4 px-4 font-bold text-sm tracking-tight">
+                            {session.play?.length || 0}
+                          </td>
+                          <td className="py-4 px-4">
+                            <span className="px-3 py-1 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full text-xs font-bold">
+                              {correct}
+                            </span>
+                          </td>
+                          <td className="py-4 px-4">
+                            <span className="px-3 py-1 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full text-xs font-bold">
+                              {incorrect}
+                            </span>
+                          </td>
+                          <td className="py-4 px-4">
+                            <span className="px-3 py-1 bg-yellow-50 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded-full text-xs font-bold">
+                              {notDone}
+                            </span>
+                          </td>
+                          <td className="py-4 px-4">
+                            <span className="font-black text-primary-600 dark:text-primary-400">
+                              {accuracy}%
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            ) : (
-              <div className="h-64 flex items-center justify-center text-gray-400">
-                No trend data available
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Detailed Session Table */}
-        <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-premium p-8 border dark:border-gray-800">
-          <h2 className="text-2xl font-black text-gray-800 dark:text-white mb-6 tracking-tight">
-            Session History
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b-2 border-gray-100 dark:border-gray-800">
-                  <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
-                    Date
-                  </th>
-                  <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
-                    Level Span
-                  </th>
-                  <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
-                    Attempts
-                  </th>
-                  <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
-                    Correct
-                  </th>
-                  <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
-                    Incorrect
-                  </th>
-                  <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
-                    Not Done
-                  </th>
-                  <th className="text-left py-4 px-4 font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-xs">
-                    Accuracy
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {sessions
-                  .slice()
-                  .reverse()
-                  .map((session, index) => {
-                    const correct = session.play.filter(
-                      (p) => p.correct === 1,
-                    ).length;
-                    const incorrect = session.play.filter(
-                      (p) => p.correct === -1,
-                    ).length;
-                    const notDone = session.play.filter(
-                      (p) => p.correct === 0,
-                    ).length;
-                    const accuracy =
-                      correct + incorrect > 0
-                        ? ((correct / (correct + incorrect)) * 100).toFixed(1)
-                        : 0;
-
-                    return (
-                      <tr
-                        key={index}
-                        className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-                      >
-                        <td className="py-4 px-4 text-sm font-medium">
-                          {new Date(session.time).toLocaleString()}
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="px-3 py-1 bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 rounded-full text-xs font-bold">
-                            {session.levelspan}s
-                          </span>
-                        </td>
-                        <td className="py-4 px-4 font-bold text-sm tracking-tight">
-                          {session.play.length}
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="px-3 py-1 bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-full text-xs font-bold">
-                            {correct}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="px-3 py-1 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-full text-xs font-bold">
-                            {incorrect}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="px-3 py-1 bg-yellow-50 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400 rounded-full text-xs font-bold">
-                            {notDone}
-                          </span>
-                        </td>
-                        <td className="py-4 px-4">
-                          <span className="font-black text-primary-600 dark:text-primary-400">
-                            {accuracy}%
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+            </div>
+          </>
+        )}
 
         {/* Level Span Update Modal */}
         {showLevelSpanModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-            <div className="bg-white dark:bg-gray-900 rounded-3xl p-8 max-w-md w-full shadow-2xl border dark:border-gray-800">
+            <div className="bg-white dark:bg-gray-900 rounded-xl p-8 max-w-md w-full shadow-2xl border dark:border-gray-800">
               <h3 className="text-2xl font-black text-gray-800 dark:text-white mb-4 tracking-tight">
                 Update Level Span
               </h3>
@@ -606,12 +1523,14 @@ const PatientAnalytics = () => {
               </div>
               <div className="flex gap-4">
                 <button
+                  type="button"
                   onClick={updateLevelSpan}
                   className="flex-1 bg-primary-500 text-white py-4 rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-primary-600 transition shadow-xl shadow-primary-500/20"
                 >
                   Update
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     setNewLevelSpan(analytics.user.currentlevelspan);
                     setShowLevelSpanModal(false);

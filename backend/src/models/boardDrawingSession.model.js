@@ -47,7 +47,7 @@ const boardDrawingAttemptSchema = new mongoose.Schema({
 
 const playEntrySchema = new mongoose.Schema({
   responsetime: { type: Number },
-  correct: { type: Number }, // -1, 0, 1 for legacy support
+  correct: { type: Number },
   score: { type: Number },
   accuracy: { type: Number },
   attempts: { type: Number },
@@ -64,22 +64,19 @@ const systemMetricsSchema = new mongoose.Schema({
   resolution: { type: String }
 }, { _id: false });
 
-const gameSessionSchema = new mongoose.Schema({
+const boardDrawingSessionSchema = new mongoose.Schema({
   user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  gameType: { type: String, required: true, index: true },
-  gameName: { type: String, required: true },
+  gameType: { type: String, required: true, default: 'board_drawing', index: true },
+  gameName: { type: String, required: true, default: 'Board Drawing' },
   time: { type: Date, default: Date.now, required: true },
-  levelspan: { type: Number }, // Mainly used for Piano Game
   sessionScore: { type: Number },
   
-  // Developer / System Metrics
   systemMetrics: systemMetricsSchema,
-
-  // Interaction / Movement data (e.g. for Board Drawing, Fruit Fetch)
+  
   coordinates: [coordinateSchema],
   boardDrawingAttempts: [boardDrawingAttemptSchema],
-  play: [playEntrySchema]
-
+  play: [playEntrySchema],
+  mode: { type: String, enum: ['laptop', 'mobile'], default: 'laptop' }
 }, { timestamps: true });
 
-module.exports = mongoose.model('GameSession', gameSessionSchema);
+module.exports = mongoose.model('BoardDrawingSession', boardDrawingSessionSchema);
