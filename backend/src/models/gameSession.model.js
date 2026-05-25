@@ -60,43 +60,8 @@ const gameSessionSchema = new mongoose.Schema({
   // Interaction / Movement data (e.g. for Board Drawing, Fruit Fetch)
   coordinates: [coordinateSchema],
   boardDrawingAttempts: [boardDrawingAttemptSchema],
-  play: [playEntrySchema],
+  play: [playEntrySchema]
 
-  // New fields for Piano Reaction Game modes
-  mode: { type: String, enum: ['laptop', 'mobile'], default: 'laptop' },
-  fingerTimeouts: {
-    thumb: { type: Number, default: 5 },
-    index: { type: Number, default: 5 },
-    middle: { type: Number, default: 5 },
-    ring: { type: Number, default: 5 },
-    pinky: { type: Number, default: 5 },
-    leftPinky: { type: Number, default: 5 },
-    leftRing: { type: Number, default: 5 },
-    leftMiddle: { type: Number, default: 5 },
-    leftIndex: { type: Number, default: 5 },
-    rightIndex: { type: Number, default: 5 },
-    rightMiddle: { type: Number, default: 5 },
-    rightRing: { type: Number, default: 5 },
-    rightPinky: { type: Number, default: 5 }
-  },
-  laptopMovements: [{
-    fromKey: String,
-    toKey: String,
-    dx: Number,
-    dy: Number,
-    distance: Number,
-    fromX: Number,
-    fromY: Number,
-    toX: Number,
-    toY: Number
-  }],
-  mobileMovements: [{
-    key: String,
-    finger: String,
-    expectedFinger: String,
-    responsetime: Number,
-    correct: Number
-  }]
 }, { timestamps: true });
 
 module.exports = mongoose.model('GameSession', gameSessionSchema);

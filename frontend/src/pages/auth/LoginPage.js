@@ -25,11 +25,11 @@ const LoginPage = () => {
       login(response.user, response.token);
 
       if (response.user.type === "doctor") {
-        navigate("/doctor/dashboard");
+        navigate("/doctor/dashboard", { replace: true });
       } else if (response.user.type === "patient") {
-        navigate("/patient/dashboard");
+        navigate("/patient/dashboard", { replace: true });
       } else if (response.user.type === "caretaker") {
-        navigate("/caretaker/dashboard");
+        navigate("/caretaker/dashboard", { replace: true });
       }
     } catch (err) {
       setError(err.response?.data?.message || "Login failed");
@@ -48,11 +48,11 @@ const LoginPage = () => {
       login(response.user, response.token);
 
       if (response.user.type === "doctor") {
-        navigate("/doctor/dashboard");
+        navigate("/doctor/dashboard", { replace: true });
       } else if (response.user.type === "patient") {
-        navigate("/patient/dashboard");
+        navigate("/patient/dashboard", { replace: true });
       } else if (response.user.type === "caretaker") {
-        navigate("/caretaker/dashboard");
+        navigate("/caretaker/dashboard", { replace: true });
       }
     } catch (err) {
       setError(err.response?.data?.message || "Demo login failed");

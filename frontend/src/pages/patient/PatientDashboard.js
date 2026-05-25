@@ -49,7 +49,9 @@ import {
   Hand,
   Circle,
   Info,
-  Star
+  Star,
+  Menu,
+  X
 } from "lucide-react";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
@@ -75,6 +77,7 @@ export default function PatientDashboard({ userId }) {
 
   // Sidebar collapse state
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Reminders and logic
   const [reminders] = useState([]);
@@ -119,6 +122,7 @@ export default function PatientDashboard({ userId }) {
   // Function to change the active section
   const changeSection = (section) => {
     setActiveSection(section);
+    setIsMobileMenuOpen(false);
   };
 
   const handleLogout = () => {
@@ -138,17 +142,26 @@ export default function PatientDashboard({ userId }) {
     <div
       className={`flex min-h-screen transition-colors duration-300 ${isDarkMode ? "bg-black text-gray-100" : "bg-[#F4F7FE] text-gray-800"}`}
     >
+      {/* Mobile Overlay Background */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
       {/* Sidebar - fixed, collapsible */}
       <aside
-        className={`fixed top-0 left-0 h-screen transition-all duration-300 z-30 flex flex-col justify-between overflow-hidden shadow-lg border-r
-        ${isCollapsed ? "w-20" : "w-64"} 
+        className={`fixed top-0 left-0 h-screen transition-all duration-300 z-50 flex flex-col justify-between overflow-hidden shadow-lg border-r
+        ${isCollapsed ? "md:w-20" : "md:w-64"} 
+        ${isMobileMenuOpen ? "w-64 translate-x-0" : "w-64 -translate-x-full md:translate-x-0"}
         bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800`}
       >
         <div className="p-0 flex flex-col h-full uppercase">
           {/* Toggle Button */}
           <button
             onClick={() => setIsCollapsed(!isCollapsed)}
-            className="p-4 flex items-center justify-center border-b border-gray-200 dark:border-gray-800"
+            className="p-4 hidden md:flex items-center justify-center border-b border-gray-200 dark:border-gray-800"
           >
             {isCollapsed ? (
               <ChevronRight
@@ -164,12 +177,20 @@ export default function PatientDashboard({ userId }) {
           </button>
 
           {/* Logo */}
-          <div className={`p-6 flex items-center space-x-2 transition-opacity`}>
-            <div className="bg-[#2B91D4] h-8 w-8 rounded-lg shadow-sm"></div>
-            {!isCollapsed && (
-              <span className="text-xl font-bold dark:text-white capitalize">
-                Young Tempo
-              </span>
+          <div className={`p-6 flex items-center justify-between transition-opacity`}>
+            <div className="flex items-center space-x-2">
+              <div className="bg-[#2B91D4] h-8 w-8 rounded-lg shadow-sm"></div>
+              {!isCollapsed && (
+                <span className="text-xl font-bold dark:text-white capitalize">
+                  Young Tempo
+                </span>
+              )}
+            </div>
+            {/* Mobile Close Sidebar Button */}
+            {isMobileMenuOpen && (
+              <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white">
+                <X size={24} />
+              </button>
             )}
           </div>
 
@@ -254,9 +275,9 @@ export default function PatientDashboard({ userId }) {
 
       {/* Main content - scrollable, offset by sidebar */}
       <div
-        className={`h-screen ${activeSection === "Chat" ? "overflow-hidden" : "overflow-y-auto"} px-10 flex-1 transition-all duration-300 fade-in
-        ${isCollapsed ? "ml-20" : "ml-64"} 
-        bg-gray-50 dark:bg-black text-gray-900 dark:text-gray-100`}
+        className={`h-screen ${activeSection === "Chat" ? "overflow-hidden" : "overflow-y-auto"} px-4 md:px-10 flex-1 transition-all duration-300 fade-in
+        ml-0 ${isCollapsed ? "md:ml-20" : "md:ml-64"} 
+        bg-gray-50 dark:bg-black text-gray-900 dark:text-gray-100 w-full`}
       >
         {activeSection !== "Chat" && (
           <TopBar
@@ -264,6 +285,7 @@ export default function PatientDashboard({ userId }) {
             isDarkMode={isDarkMode}
             toggleDarkMode={toggleDarkMode}
             handleLogout={handleLogout}
+            onToggleMobileMenu={() => setIsMobileMenuOpen(true)}
           />
         )}
         <main
@@ -757,7 +779,7 @@ const FINGER_SORT_ORDER = {
   " ": 90
 };
 
-const FingerClickVisualizer = ({ fingerTimeouts, movements, isDarkMode }) => {
+const FingerClickVisualizer = ({ session, fingerTimeouts, movements, isDarkMode }) => {
   const [activeStep, setActiveStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
@@ -775,21 +797,45 @@ const FingerClickVisualizer = ({ fingerTimeouts, movements, isDarkMode }) => {
     return fingers;
   }, [movements]);
 
-  // 1. Sort keys left-to-right
-  // 2. Map keys to a single horizontal row
-  // 3. Attach the Expected Finger name
+  // 1. Map keys from fingerTimeouts
+  // 2. Sort keys left-to-right
+  // 3. Map keys to a single horizontal row
   const activeKeyCoords = useMemo(() => {
-    if (!movements || movements.length === 0) return {};
-
     const keyDataMap = {};
-    movements.forEach(m => {
-      if (m.key) {
-        const k = m.key.toUpperCase();
-        if (!keyDataMap[k]) {
-          keyDataMap[k] = { key: k, expectedFinger: m.expectedFinger };
-        }
+
+    if (fingerTimeouts) {
+      const mode = session?.mode || 'laptop';
+      const map = {
+        leftPinky: 'A', leftRing: 'S', leftMiddle: 'D', leftIndex: 'F',
+        rightIndex: 'H', rightMiddle: 'J', rightRing: 'K', rightPinky: 'L'
+      };
+      if (mode === 'mobile') {
+         const keys = Object.keys(fingerTimeouts);
+         if (keys.includes('thumb')) {
+            map.thumb = 'A'; map.index = 'S'; map.middle = 'D'; map.ring = 'F'; map.pinky = 'G';
+         } else {
+            map.pinky = 'A'; map.ring = 'S'; map.middle = 'D'; map.index = 'F';
+         }
       }
-    });
+      
+      Object.keys(fingerTimeouts).forEach(finger => {
+         const k = map[finger];
+         if (k && fingerTimeouts[finger] !== -1) {
+           keyDataMap[k] = { key: k, expectedFinger: finger, isDisabled: fingerTimeouts[finger] === 0 };
+         }
+      });
+    }
+
+    if (movements && Object.keys(keyDataMap).length === 0) {
+      movements.forEach(m => {
+        if (m.key) {
+          const k = m.key.toUpperCase();
+          if (!keyDataMap[k]) {
+            keyDataMap[k] = { key: k, expectedFinger: m.expectedFinger, isDisabled: false };
+          }
+        }
+      });
+    }
 
     const getSortWeight = (k) => FINGER_SORT_ORDER[k] || 100;
     
@@ -797,19 +843,15 @@ const FingerClickVisualizer = ({ fingerTimeouts, movements, isDarkMode }) => {
     const sortedKeys = Object.values(keyDataMap).sort((a, b) => getSortWeight(a.key) - getSortWeight(b.key));
     
     const coords = {};
-    const totalKeys = sortedKeys.length;
-    const spacing = 100 / (totalKeys + 1);
-
     sortedKeys.forEach((item, index) => {
       coords[item.key] = {
-        x: spacing * (index + 1),
-        y: 50, // All on one horizontal line
-        expectedFinger: item.expectedFinger
+        expectedFinger: item.expectedFinger,
+        isDisabled: item.isDisabled
       };
     });
 
     return coords;
-  }, [movements]);
+  }, [movements, fingerTimeouts, session?.mode]);
 
   useEffect(() => {
     setActiveStep(0);
@@ -862,9 +904,9 @@ const FingerClickVisualizer = ({ fingerTimeouts, movements, isDarkMode }) => {
     return spaced.charAt(0).toUpperCase() + spaced.slice(1);
   };
 
-  // Filter timeouts to only show the ones actively used in the movements
+  // Use all timeouts defined in the session
   const filteredTimeouts = fingerTimeouts 
-    ? Object.entries(fingerTimeouts).filter(([finger]) => activeFingersSet.has(finger))
+    ? Object.entries(fingerTimeouts).filter(([_, timeout]) => timeout !== -1)
     : [];
 
   return (
@@ -882,15 +924,15 @@ const FingerClickVisualizer = ({ fingerTimeouts, movements, isDarkMode }) => {
               return (
                 <div 
                   key={finger} 
-                  className="flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-300 shadow-sm"
+                  className={`flex items-center gap-1.5 px-2.5 py-1 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700 text-xs text-gray-700 dark:text-gray-300 shadow-sm ${timeout === 0 ? 'opacity-50 grayscale' : ''}`}
                 >
                   <div 
                     className="w-2.5 h-2.5 rounded-full shadow-sm" 
                     style={{ backgroundColor: dotColor }} 
                   />
-                  <span className="font-medium">{formatFingerFull(finger)}</span>
+                  <span className={`font-medium ${timeout === 0 ? 'line-through' : ''}`}>{formatFingerFull(finger)}</span>
                   <span className="text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded-md ml-1 font-mono">
-                    {timeout}s
+                    {timeout === 0 ? 'DISABLED' : `${timeout}s`}
                   </span>
                 </div>
               );
@@ -900,119 +942,103 @@ const FingerClickVisualizer = ({ fingerTimeouts, movements, isDarkMode }) => {
       )}
 
       {/* SVG Canvas */}
-      <div className="relative w-full aspect-[2.5/1] bg-gray-900 rounded-2xl border border-gray-800 shadow-inner overflow-hidden">
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:5%_10%] opacity-20"></div>
+      <div className="relative w-full py-16 px-2 sm:px-6 bg-gray-900 rounded-2xl border border-gray-800 shadow-inner overflow-hidden flex flex-nowrap gap-2 sm:gap-4 items-center justify-center">
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1f2937_1px,transparent_1px),linear-gradient(to_bottom,#1f2937_1px,transparent_1px)] bg-[size:5%_10%] opacity-20 pointer-events-none"></div>
 
-        <svg viewBox="0 0 100 100" className="w-full h-full p-4">
-          
-          {/* Draw ONLY the keys used in this session */}
-          {Object.entries(activeKeyCoords).map(([letter, pos]) => {
+        {Object.entries(activeKeyCoords)
+          .sort((a,b) => FINGER_SORT_ORDER[a[0]] - FINGER_SORT_ORDER[b[0]])
+          .map(([letter, pos]) => {
             const isCurrent = currentMove?.key?.toUpperCase() === letter;
             const isPrevious = previousMove?.key?.toUpperCase() === letter && !isCurrent;
+            const wasPlayed = activeFingersSet.has(pos.expectedFinger);
             
-            let fillColor = "#1F2937";      // Default dark gray background
-            let strokeColor = "#374151";    // Default border
-            let strokeWidth = "0.3";        // Default thin border
-            let textColor = "#9CA3AF";      // Default text color
+            let bgClass = "bg-gray-800";
+            let borderClass = "border-gray-700";
+            let textClass = "text-gray-400";
+            let opacityClass = "opacity-100";
+            let customStyle = {};
+
+            if (pos.isDisabled) {
+              opacityClass = "opacity-30";
+              bgClass = "bg-gray-950";
+              borderClass = "border-gray-900";
+            } else if (!wasPlayed) {
+              opacityClass = "opacity-60"; // Faint because it was never played
+            }
 
             if (isCurrent) {
-              // Current key gets bright colors and thick border
-              fillColor = FINGER_COLORS[currentMove?.finger] || FINGER_COLORS.default;
-              strokeColor = currentMove.correct ? "#10B981" : "#EF4444"; // Bright Green/Red
-              strokeWidth = "1.5";
-              textColor = "#FFFFFF";
+              bgClass = ""; 
+              customStyle.backgroundColor = FINGER_COLORS[currentMove?.finger] || FINGER_COLORS.default;
+              borderClass = currentMove.correct ? "border-emerald-500 border-4 scale-110 shadow-[0_0_15px_rgba(16,185,129,0.5)]" : "border-red-500 border-4 scale-110 shadow-[0_0_15px_rgba(239,68,68,0.5)]";
+              textClass = "text-white font-bold";
+              opacityClass = "opacity-100 z-10";
             } else if (isPrevious) {
-              // Previous key gets a faded, darker border to show the "ghost" of the last press
-              strokeColor = previousMove.correct ? "#064E3B" : "#7F1D1D"; // Dark Green/Red
-              strokeWidth = "0.7"; 
-              textColor = "#D1D5DB";
+              borderClass = previousMove.correct ? "border-emerald-800 border-2" : "border-red-800 border-2";
+              textClass = "text-gray-300";
             }
 
             return (
-              <g key={letter} transform={`translate(${pos.x}, ${pos.y})`}>
-                <rect
-                  x="-5"
-                  y="-6"
-                  width="10"
-                  height="12"
-                  rx="2"
-                  fill={fillColor}
-                  stroke={strokeColor}
-                  strokeWidth={strokeWidth}
-                  className="transition-all duration-300 shadow-lg"
-                />
-                <text
-                  textAnchor="middle"
-                  dy="1.5"
-                  fontSize="4"
-                  fontWeight="bold"
-                  fill={textColor}
-                  className="transition-colors duration-300"
-                >
-                  {letter}
-                </text>
-                
-                {/* Finger Name Display below Key */}
-                <text
-                  textAnchor="middle"
-                  dy="11"
-                  fontSize="2.5"
-                  fontWeight="500"
-                  fill={isCurrent ? strokeColor : (isPrevious ? strokeColor : "#6B7280")}
-                  className="transition-colors duration-300"
-                >
-                  {formatFingerShort(pos.expectedFinger)}
-                </text>
-              </g>
+              <div 
+                key={letter}
+                className={`relative flex-1 flex flex-col items-center justify-center h-24 sm:h-32 max-w-[120px] rounded-xl border-2 transition-all duration-300 ${bgClass} ${borderClass} ${textClass} ${opacityClass}`}
+                style={customStyle}
+              >
+                <span className="text-2xl sm:text-4xl font-black">{letter}</span>
+                <span className="text-[10px] sm:text-xs mt-2 uppercase tracking-wider opacity-80">{formatFingerShort(pos.expectedFinger)}</span>
+                {pos.isDisabled && (
+                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/80 px-2 py-1 rounded text-[10px] text-white whitespace-nowrap transform -rotate-12 border border-white/20">DISABLED</div>
+                )}
+              </div>
             );
-          })}
-        </svg>
+        })}
+      </div>
 
         {/* Live Metrics overlay */}
         {currentMove && (
-          <div className="absolute bottom-3 left-3 right-3 flex justify-between items-center bg-black/80 backdrop-blur-sm border border-gray-800 p-3 rounded-xl text-white text-xs font-mono">
+          <div className="w-full flex justify-between items-center bg-gray-900/80 backdrop-blur-sm border border-gray-800 p-4 rounded-xl text-white text-xs font-mono shadow-md">
             <div className="flex flex-col">
-              <span className="text-gray-400 text-[10px]">Step</span>
-              <span>{activeStep + 1} / {movements.length}</span>
+              <span className="text-gray-400 text-[10px] uppercase tracking-wider">Step</span>
+              <span className="text-sm">{activeStep + 1} / {movements.length}</span>
             </div>
             
             <div className="flex flex-col items-center">
-              <span className="text-gray-400 text-[10px]">Target</span>
-              <span className={`font-bold text-lg ${currentMove.correct ? "text-emerald-400" : "text-red-400"}`}>
-                {currentMove.key}
+              <span className="text-gray-400 text-[10px] uppercase tracking-wider">Pressed Key</span>
+              <span className={`font-bold text-xl ${currentMove.correct ? "text-emerald-400" : "text-red-400"}`}>
+                {currentMove.key === 'none' ? '—' : currentMove.key}
               </span>
             </div>
 
             <div className="flex flex-col">
-              <span className="text-gray-400 text-[10px]">Action</span>
-              <span className="flex items-center gap-1">
+              <span className="text-gray-400 text-[10px] uppercase tracking-wider">Action</span>
+              <span className="flex items-center gap-1 text-sm">
                 <div 
                   className="w-2 h-2 rounded-full" 
-                  style={{ backgroundColor: FINGER_COLORS[currentMove.finger] || FINGER_COLORS.default }}
+                  style={{ backgroundColor: currentMove.finger === 'none' ? '#ef4444' : (FINGER_COLORS[currentMove.finger] || FINGER_COLORS.default) }}
                 />
-                {formatFingerFull(currentMove.finger)}
+                {currentMove.finger === 'none' ? 'Timeout (Missed)' : formatFingerFull(currentMove.finger)}
               </span>
               {currentMove.finger !== currentMove.expectedFinger && (
-                <span className="text-[9px] text-red-400">
+                <span className="text-[10px] text-red-400 mt-1">
                   Expected: {formatFingerFull(currentMove.expectedFinger)}
                 </span>
               )}
             </div>
 
             <div className="flex flex-col text-right">
-              <span className="text-gray-400 text-[10px]">Speed</span>
-              <span className={
-                  fingerTimeouts && currentMove.responsetime > (fingerTimeouts[currentMove.finger] || 99) 
+              <span className="text-gray-400 text-[10px] uppercase tracking-wider">Speed</span>
+              <span className={`text-sm ${
+                  currentMove.responsetime === -1 
+                  ? "text-yellow-400"
+                  : (fingerTimeouts && currentMove.responsetime > (fingerTimeouts[currentMove.finger] || 99))
                   ? "text-red-400" 
                   : "text-emerald-400"
-                }
+                }`}
               >
-                {currentMove.responsetime}s
+                {currentMove.responsetime === -1 ? 'TIMEOUT' : `${currentMove.responsetime}s`}
               </span>
             </div>
           </div>
         )}
-      </div>
 
       {/* Control Buttons */}
       <div className="flex items-center gap-3">
@@ -1284,122 +1310,135 @@ const PianoReactionGameAnalytics = ({ session, isDarkMode }) => {
 
   console.log("Session Data:", session);
 
-  if (mode === "laptop") {
-    const totalDistance = laptopMovements.reduce((sum, m) => sum + (m.distance || 0), 0);
-    const avgDistance = laptopMovements.length > 0 ? totalDistance / laptopMovements.length : 0;
+  const totalDistance = laptopMovements.reduce((sum, m) => sum + (m.distance || 0), 0);
+  const avgDistance = laptopMovements.length > 0 ? totalDistance / laptopMovements.length : 0;
 
-    return (
-      <div className="space-y-6 mt-4">
-        {/* Laptop Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
-            <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Total Pixel Distance Moved</p>
-            <p className="text-3xl font-black text-primary-600 dark:text-primary-400">
-              {totalDistance.toFixed(1)} px
-            </p>
-            <p className="text-xs text-gray-400 mt-1">Sum of physical movement deltas between keys</p>
-          </div>
-          <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
-            <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Avg Transition Distance</p>
-            <p className="text-3xl font-black text-secondary-600 dark:text-secondary-400">
-              {avgDistance.toFixed(1)} px
-            </p>
-            <p className="text-xs text-gray-400 mt-1">Average pixel travel per key response</p>
-          </div>
-        </div>
+  const fingerKeys = ['thumb', 'index', 'middle', 'ring', 'pinky', 'leftPinky', 'leftRing', 'leftMiddle', 'leftIndex', 'rightIndex', 'rightMiddle', 'rightRing', 'rightPinky'];
+  const fingerIcons = { thumb: <ThumbsUp size={16} />, index: <PenTool size={16} />, middle: <Hand size={16} />, ring: <Circle size={16} />, pinky: <Hand size={16} />, leftPinky: <Hand size={16} />, leftRing: <Circle size={16} />, leftMiddle: <Hand size={16} />, leftIndex: <PenTool size={16} />, rightIndex: <PenTool size={16} />, rightMiddle: <Hand size={16} />, rightRing: <Circle size={16} />, rightPinky: <Hand size={16} /> };
+  const fingerNames = { thumb: "Thumb", index: "Index", middle: "Middle", ring: "Ring", pinky: "Pinky", leftPinky: "L Pinky", leftRing: "L Ring", leftMiddle: "L Middle", leftIndex: "L Index", rightIndex: "R Index", rightMiddle: "R Middle", rightRing: "R Ring", rightPinky: "R Pinky" };
 
-        {/* Laptop Visualizer */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
-          <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Wrist/Arm Movement Vector Trajectory</h3>
-          <p className="text-xs text-gray-400 mb-4">Sequential coordinate path mapping response targets in absolute pixel coordinates.</p>
-          <FingerClickVisualizer fingerTimeouts={session?.fingerTimeouts} movements={mobileMovements} isDarkMode={isDarkMode} />
-        </div>
-      </div>
-    );
-  } else {
-    const fingerKeys = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-    const fingerIcons = { thumb: <ThumbsUp size={16} />, index: <PenTool size={16} />, middle: <Hand size={16} />, ring: <Circle size={16} />, pinky: <Hand size={16} /> };
-    const fingerNames = { thumb: "Thumb", index: "Index", middle: "Middle", ring: "Ring", pinky: "Pinky" };
+  const activeFingerKeys = session?.fingerTimeouts 
+    ? Object.keys(session.fingerTimeouts).filter(f => session.fingerTimeouts[f] !== -1)
+    : ['thumb', 'index', 'middle', 'ring', 'pinky'];
 
-    const fingerStats = fingerKeys.map(finger => {
-      const movements = mobileMovements.filter(m => m.expectedFinger === finger);
-      const total = movements.length;
-      const correct = movements.filter(m => m.correct === 1).length;
-      const incorrect = movements.filter(m => m.correct === -1).length;
+  const fingerStats = activeFingerKeys.map(finger => {
+    const movements = mobileMovements.filter(m => m.expectedFinger === finger);
+    const total = movements.length;
+    const correct = movements.filter(m => m.correct === 1).length;
+    const incorrect = movements.filter(m => m.correct === -1).length;
+    
+    const correctMovements = movements.filter(m => m.correct === 1 && m.responsetime > 0);
+    const avgResponse = correctMovements.length > 0
+      ? correctMovements.reduce((sum, m) => sum + m.responsetime, 0) / correctMovements.length
+      : 0;
       
-      const correctMovements = movements.filter(m => m.correct === 1 && m.responsetime > 0);
-      const avgResponse = correctMovements.length > 0
-        ? correctMovements.reduce((sum, m) => sum + m.responsetime, 0) / correctMovements.length
-        : 0;
-        
-      const accuracy = (correct + incorrect) > 0
-        ? (correct / (correct + incorrect)) * 100
-        : 0;
+    const accuracy = (correct + incorrect) > 0
+      ? (correct / (correct + incorrect)) * 100
+      : 0;
 
-      return {
-        finger,
-        name: fingerNames[finger],
-        icon: fingerIcons[finger],
-        total,
-        correct,
-        incorrect,
-        avgResponse,
-        accuracy,
-        timeout: fingerTimeouts[finger] || 5
-      };
-    }).filter(f => f.total > 0);
+    return {
+      finger,
+      name: fingerNames[finger] || finger,
+      icon: fingerIcons[finger] || <Hand size={16} />,
+      total,
+      correct,
+      incorrect,
+      avgResponse,
+      accuracy,
+      timeout: fingerTimeouts[finger] || 5,
+      isDisabled: fingerTimeouts[finger] === 0
+    };
+  });
 
-    return (
-      <div className="space-y-6 mt-4">
-        {/* Mobile Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
-          {fingerStats.map(f => (
-            <div key={f.finger} className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-150 dark:border-gray-700 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-lg text-primary-500">{f.icon}</span>
-                <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 rounded-lg text-[10px] font-bold">
-                  Limit: {f.timeout}s
-                </span>
+  return (
+    <div className="space-y-8 mt-4">
+      {/* Laptop Stats (Distance & Trajectory) */}
+      {laptopMovements.length > 0 && session?.gameType !== 'piano_finger' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+              <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Total Pixel Distance Moved</p>
+              <p className="text-3xl font-black text-primary-600 dark:text-primary-400">
+                {totalDistance.toFixed(1)} px
+              </p>
+              <p className="text-xs text-gray-400 mt-1">Sum of physical movement deltas between keys</p>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-100 dark:border-gray-700 shadow-sm">
+              <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-1">Avg Transition Distance</p>
+              <p className="text-3xl font-black text-secondary-600 dark:text-secondary-400">
+                {avgDistance.toFixed(1)} px
+              </p>
+              <p className="text-xs text-gray-400 mt-1">Average pixel travel per key response</p>
+            </div>
+          </div>
+
+          <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+            <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Wrist/Arm Movement Vector Trajectory</h3>
+            <p className="text-xs text-gray-400 mb-4">Sequential coordinate path mapping response targets in absolute pixel coordinates.</p>
+            <LaptopMovementVisualizer movements={laptopMovements} isDarkMode={isDarkMode} />
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Stats (Finger Dexterity) */}
+      {mobileMovements.length > 0 && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            {fingerStats.map(f => (
+              <div key={f.finger} className={`bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-150 dark:border-gray-700 shadow-sm ${f.isDisabled ? 'opacity-50 grayscale' : ''}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-lg text-primary-500">{f.icon}</span>
+                  <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${f.isDisabled ? 'bg-red-100 text-red-600' : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400'}`}>
+                    {f.isDisabled ? 'DISABLED' : `Limit: ${f.timeout}s`}
+                  </span>
+                </div>
+                <h4 className="font-bold text-sm text-gray-800 dark:text-white mb-1">{f.name} Finger</h4>
+                <p className="text-[11px] text-gray-400 mb-3">{f.correct} of {f.total} correct</p>
+                
+                <div className="space-y-2 pt-2 border-t dark:border-gray-700">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400">Response</span>
+                    <span className="font-bold text-primary-600 dark:text-primary-400">{f.avgResponse.toFixed(2)}s</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-gray-400">Accuracy</span>
+                    <span className="font-bold text-green-600 dark:text-green-400">{f.accuracy.toFixed(0)}%</span>
+                  </div>
+                </div>
               </div>
-              <h4 className="font-bold text-sm text-gray-800 dark:text-white mb-1">{f.name} Finger</h4>
-              <p className="text-[11px] text-gray-400 mb-3">{f.correct} of {f.total} correct</p>
-              
-              <div className="space-y-2 pt-2 border-t dark:border-gray-700">
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-400">Response</span>
-                  <span className="font-bold text-primary-600 dark:text-primary-400">{f.avgResponse.toFixed(2)}s</span>
-                </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-gray-400">Accuracy</span>
-                  <span className="font-bold text-green-600 dark:text-green-400">{f.accuracy.toFixed(0)}%</span>
-                </div>
+            ))}
+          </div>
+
+          <div className="gap-6">
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+              <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Finger Dexterity Profile</h3>
+              <p className="text-xs text-gray-400 mb-4">Response times and accuracy compared across active fingers.</p>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={fingerStats} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#1F2937" : "#F3F4F6"} />
+                    <XAxis dataKey="name" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
+                    <YAxis yAxisId="left" orientation="left" unit="s" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
+                    <YAxis yAxisId="right" orientation="right" unit="%" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
+                    <Tooltip contentStyle={{ backgroundColor: isDarkMode ? "#111827" : "#FFFFFF", borderColor: isDarkMode ? "#374151" : "#E5E7EB", borderRadius: "8px" }} />
+                    <Legend />
+                    <Bar yAxisId="left" dataKey="avgResponse" fill="#3B82F6" name="Avg Response (s)" radius={[4, 4, 0, 0]} />
+                    <Bar yAxisId="right" dataKey="accuracy" fill="#10B981" name="Accuracy (%)" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
               </div>
             </div>
-          ))}
-        </div>
 
-        {/* Comparison Chart */}
-        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
-          <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Finger Dexterity Profile</h3>
-          <p className="text-xs text-gray-400 mb-4">Response times and accuracy compared across active fingers.</p>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={fingerStats} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? "#1F2937" : "#F3F4F6"} />
-                <XAxis dataKey="name" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
-                <YAxis yAxisId="left" orientation="left" unit="s" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
-                <YAxis yAxisId="right" orientation="right" unit="%" tick={{ fill: isDarkMode ? "#9CA3AF" : "#6B7280", fontSize: 11 }} />
-                <Tooltip contentStyle={{ backgroundColor: isDarkMode ? "#111827" : "#FFFFFF", borderColor: isDarkMode ? "#374151" : "#E5E7EB", borderRadius: "8px" }} />
-                <Legend />
-                <Bar yAxisId="left" dataKey="avgResponse" fill="#3B82F6" name="Avg Response (s)" radius={[4, 4, 0, 0]} />
-                <Bar yAxisId="right" dataKey="accuracy" fill="#10B981" name="Accuracy (%)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-150 dark:border-gray-700 shadow-sm">
+              <h3 className="text-base font-bold text-gray-800 dark:text-white mb-1">Finger Playboard Simulation</h3>
+              <p className="text-xs text-gray-400 mb-4">Visual reconstruction of finger transitions and accuracy.</p>
+              <FingerClickVisualizer session={session} fingerTimeouts={session?.fingerTimeouts} movements={mobileMovements} isDarkMode={isDarkMode} />
+            </div>
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
+    </div>
+  );
 };
 
 // Extracted Dashboard content into its own component
@@ -1411,7 +1450,7 @@ const GAMES_LIST = [
     desc: "Tests and improves cognitive reaction speeds by tapping highlighted piano keys in response to stimuli.",
     clinicalFocus: "Cognitive processing speed, manual dexterity, and hand-eye coordination.",
     hasCoordinates: false,
-    icon: <Music className="w-12 h-12 text-white" />,
+    icon: <Music className="w-12 h-12" />,
     color: "from-violet-700 to-indigo-800",
     accent: "#7C3AED",
   },
@@ -1422,7 +1461,7 @@ const GAMES_LIST = [
     desc: "Traces complex board paths to evaluate distal hand movements, precision, and tremor control.",
     clinicalFocus: "Fine motor control, hand tremor reduction, and continuous movement precision.",
     hasCoordinates: false,
-    icon: <Edit3 className="w-12 h-12 text-white" />,
+    icon: <Edit3 className="w-12 h-12" />,
     color: "from-blue-700 to-cyan-800",
     accent: "#2563EB",
   },
@@ -1433,7 +1472,7 @@ const GAMES_LIST = [
     desc: "Grasp and move falling fruits into a basket using full arm gestures to improve range of motion.",
     clinicalFocus: "Gross motor coordination, shoulder/elbow articulation, and spatial reaching velocity.",
     hasCoordinates: true,
-    icon: <Target className="w-12 h-12 text-white" />,
+    icon: <Target className="w-12 h-12" />,
     color: "from-orange-600 to-amber-700",
     accent: "#EA580C",
   },
@@ -1932,11 +1971,11 @@ const DashboardContent = ({
                 onClick={() => { setSelectedGameType(g.type); setSelectedSession(0); }}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
                   selectedGameType === g.type
-                    ? 'bg-gray-900 text-white shadow-md dark:bg-white dark:text-gray-900'
+                    ? 'bg-gray-900 text-white shadow-md dark:bg-gray-100 dark:text-gray-900'
                     : 'bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600'
                 }`}
               >
-                <span className="text-base">{g.icon}</span>
+                <span className="text-base" style={{ color: g.accent }}>{React.cloneElement(g.icon, { className: 'w-5 h-5' })}</span>
                 <span>{g.name}</span>
                 {selectedGameType === g.type && (
                   <span className="w-1.5 h-1.5 rounded-full bg-green-400"></span>
@@ -2063,14 +2102,10 @@ const DashboardContent = ({
                 </div>
               </div>
 
-              {/* Session Play-by-Play */}
-              <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
-                  <div>
-                    <h3 className="text-base font-bold text-gray-800 dark:text-white">Session Replay</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">Response time per attempt</p>
-                  </div>
-                  {/* Session selector pills */}
+              {/* Sticky Session Selector */}
+              <div className="sticky top-[10px] z-30 bg-white/80 dark:bg-gray-900/80 backdrop-blur-md rounded-xl p-4 border border-gray-200 dark:border-gray-700 shadow-sm mb-6 flex flex-col gap-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h3 className="text-sm font-bold text-gray-800 dark:text-white">Select Session Replay</h3>
                   <div className="flex flex-wrap gap-2">
                     {last7ChronDesc.map((s, i) => (
                       <button
@@ -2087,9 +2122,8 @@ const DashboardContent = ({
                     ))}
                   </div>
                 </div>
-                {/* Selected session info strip */}
                 {last7ChronDesc[selectedSession] && (
-                  <div className="flex flex-wrap items-center gap-3 mb-4 p-3 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
+                  <div className="flex flex-wrap items-center gap-3 p-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                     <div className="text-[11px] text-gray-400 font-medium">
                       {new Date(last7ChronDesc[selectedSession].time).toLocaleString()}
                     </div>
@@ -2106,6 +2140,14 @@ const DashboardContent = ({
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Session Play-by-Play Chart */}
+              <div className="bg-white dark:bg-gray-800 rounded-xl p-6 border border-gray-100 dark:border-gray-700 shadow-sm">
+                <div className="mb-5">
+                  <h3 className="text-base font-bold text-gray-800 dark:text-white">Response Time Trend</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">Response time per attempt</p>
+                </div>
                 {attemptData.length > 0 ? (
                   <div className="h-52">
                     {isMounted && (
@@ -2232,7 +2274,7 @@ const DashboardContent = ({
             </div>
 
             {/* Summary Cards Row */}
-            <div className="grid grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               {/* Daily Goal */}
               <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
                 <p className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-3">Daily Goal</p>
@@ -2304,7 +2346,7 @@ const DashboardContent = ({
                     >
                       {/* Visual Header */}
                       <div className="bg-slate-50 dark:bg-slate-900/50 h-28 flex flex-col items-center justify-center relative border-b border-slate-100 dark:border-slate-700">
-                        <span className="text-slate-700 dark:text-slate-300">
+                        <span style={{ color: game.accent }}>
                           {React.cloneElement(game.icon, { className: 'w-12 h-12' })}
                         </span>
                         {playCount > 0 && (
@@ -2349,7 +2391,7 @@ const DashboardContent = ({
             {/* Performance Overview */}
             <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700 shadow-sm">
               <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 mb-4">Performance</h3>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="bg-blue-50/50 dark:bg-blue-900/10 rounded-xl p-4 border border-blue-100 dark:border-blue-900/20">
                   <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 mb-1">Level</p>
                   <p className="text-2xl font-bold text-blue-900 dark:text-blue-100">{stats?.level || 1}</p>
@@ -2585,7 +2627,7 @@ const EditReminderModal = ({ reminder, onClose, onSave }) => {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-gray-400 ml-4">
                 Date
@@ -2650,16 +2692,25 @@ const TopBar = ({
   isDarkMode,
   toggleDarkMode,
   handleLogout,
+  onToggleMobileMenu
 }) => (
-  <div className="flex justify-between items-center py-8">
-    <div className="flex items-center gap-2">
-      <div className="w-2 h-8 bg-primary-500 rounded-full"></div>
-      <h2 className="text-2xl font-black dark:text-white tracking-widest uppercase">
+  <div className="flex justify-between items-center py-6 md:py-8">
+    <div className="flex items-center gap-2 md:gap-4">
+      {onToggleMobileMenu && (
+        <button 
+          onClick={onToggleMobileMenu}
+          className="md:hidden p-2 -ml-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+        >
+          <Menu size={26} />
+        </button>
+      )}
+      <div className="w-2 h-8 bg-primary-500 rounded-full hidden md:block"></div>
+      <h2 className="text-xl md:text-2xl font-black dark:text-white tracking-widest uppercase truncate max-w-[150px] sm:max-w-xs">
         {activeSection}
       </h2>
     </div>
 
-    <div className="flex items-center gap-4">
+    <div className="flex items-center gap-3 md:gap-4">
       {/* <div className="relative group">
         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-primary-500 transition-colors" size={18} />
         <input
@@ -2678,10 +2729,10 @@ const TopBar = ({
 
       <button
         onClick={handleLogout}
-        className="flex items-center gap-2 px-5 py-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-2xl font-bold text-sm hover:bg-red-100 dark:hover:bg-red-900/40 transition-all ml-2"
+        className="flex items-center gap-2 px-3 py-2 md:px-5 md:py-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-2xl font-bold text-sm hover:bg-red-100 dark:hover:bg-red-900/40 transition-all md:ml-2"
       >
         <LogOut size={18} />
-        <span>Logout</span>
+        <span className="hidden sm:inline">Logout</span>
       </button>
     </div>
   </div>

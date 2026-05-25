@@ -253,6 +253,7 @@ const PlayingGame = ({
   keyboardLayout,
   mobileKeysCount,
   fingerTimeouts,
+  disabledKeys,
 }) => {
   const containerRef = useRef(null);
   const lastSampleTimeRef = useRef(0);
@@ -299,24 +300,24 @@ const PlayingGame = ({
     if (platform === 'laptop') {
       if (exerciseType === 'piano_finger') {
         if (keyboardLayout === 'both') {
-          if (k === 'A') return 'pinky';
-          if (k === 'S') return 'ring';
-          if (k === 'D') return 'middle';
-          if (k === 'F') return 'index';
-          if (k === 'H') return 'index';
-          if (k === 'J') return 'middle';
-          if (k === 'K') return 'ring';
-          if (k === 'L') return 'pinky';
+          if (k === 'A') return 'leftPinky';
+          if (k === 'S') return 'leftRing';
+          if (k === 'D') return 'leftMiddle';
+          if (k === 'F') return 'leftIndex';
+          if (k === 'H') return 'rightIndex';
+          if (k === 'J') return 'rightMiddle';
+          if (k === 'K') return 'rightRing';
+          if (k === 'L') return 'rightPinky';
         } else if (keyboardLayout === 'left') {
-          if (k === 'A') return 'pinky';
-          if (k === 'S') return 'ring';
-          if (k === 'D') return 'middle';
-          if (k === 'F') return 'index';
+          if (k === 'A') return 'leftPinky';
+          if (k === 'S') return 'leftRing';
+          if (k === 'D') return 'leftMiddle';
+          if (k === 'F') return 'leftIndex';
         } else {
-          if (k === 'H') return 'index';
-          if (k === 'J') return 'middle';
-          if (k === 'K') return 'ring';
-          if (k === 'L') return 'pinky';
+          if (k === 'H') return 'rightIndex';
+          if (k === 'J') return 'rightMiddle';
+          if (k === 'K') return 'rightRing';
+          if (k === 'L') return 'rightPinky';
         }
       }
     } else {
@@ -440,7 +441,7 @@ const PlayingGame = ({
           onPointerMove={handlePointerMove}
           className="flex-1 relative mb-6 border-4 border-gray-200 rounded-xl bg-gradient-to-br from-white to-gray-50 overflow-hidden"
         >
-          <div className="h-full flex flex-col-reverse md:flex-row">
+          <div className="h-full flex flex-col md:flex-row">
             {activeKeys.map((key, index) => {
               const isActive = currentSection === index;
               const isFeedback = index === feedbackSection;
@@ -457,19 +458,20 @@ const PlayingGame = ({
               const textClass = isActive ? "text-white" : "text-gray-400";
 
               const fontSize = activeKeys.length <= 4
-                ? "text-5xl md:text-8xl"
+                ? "text-6xl md:text-8xl"
                 : activeKeys.length <= 6
-                  ? "text-4xl md:text-7xl"
-                  : "text-2xl md:text-5xl";
+                  ? "text-5xl md:text-7xl"
+                  : "text-4xl md:text-5xl";
 
               const fingerLabel = getFingerLabel(index, activeKeys.length);
+              const isDisabled = disabledKeys && disabledKeys.includes(key);
 
               return (
                 <div
                   key={index}
                   id={`piano-key-${key}`}
-                  className={`w-full md:flex-1 flex flex-col items-center justify-center border-b md:border-r border-gray-200 last:border-b-0 md:last:border-r-0 md:last:border-b-0 transition-all duration-200 ${isActive ? "hover:bg-gray-800" : "hover:bg-gray-100"} hover:bg-gray-300 cursor-pointer ${bgClass} ${resultClass} flex-1`}
-                  onClick={() => handleSectionClick(index)}
+                  className={`flex-1 flex flex-col items-center justify-center min-h-[80px] border-b md:border-b-0 md:border-r border-gray-200 transition-all duration-200 ${isActive ? "hover:bg-gray-800" : "hover:bg-gray-100"} hover:bg-gray-300 cursor-pointer ${bgClass} ${resultClass} ${isDisabled ? 'opacity-50 grayscale' : ''}`}
+                  onClick={() => !isDisabled && handleSectionClick(index)}
                 >
                   <div
                     className={`${fontSize} font-bold ${textClass} transition-colors duration-200 mb-1`}
@@ -477,12 +479,12 @@ const PlayingGame = ({
                     {key}
                   </div>
                   <span
-                    className={`text-xs md:text-sm font-mono ${isActive ? "text-white/80" : "text-gray-500"} transition-colors duration-200`}
+                    className={`text-sm md:text-base font-mono ${isActive ? "text-white/80" : "text-gray-500"} transition-colors duration-200`}
                   >
                     {noteNames[index]}
                   </span>
                   {fingerLabel && (
-                    <span className={`block text-xs font-bold mt-2 ${isActive ? 'text-white/95' : 'text-primary-600'}`}>
+                    <span className={`block text-sm md:text-base font-bold mt-2 ${isActive ? 'text-white/95' : 'text-primary-600'}`}>
                       {fingerLabel}
                     </span>
                   )}
@@ -517,11 +519,11 @@ const PlayingGame = ({
                   borderColor: PRIMARY_BLUE,
                 }}
               >
-                <p className="text-xs text-white font-semibold">{fingerLabel || 'Key'}</p>
-                <p className="text-2xl font-bold text-white">{key}</p>
-                <p className="text-xs text-white/80">{noteNames[index]}</p>
+                <p className="text-xs md:text-sm text-white font-semibold">{fingerLabel || 'Key'}</p>
+                <p className="text-3xl md:text-4xl font-bold text-white">{key}</p>
+                <p className="text-sm text-white/80">{noteNames[index]}</p>
                 {(platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) && (
-                  <p className="text-[10px] text-white/95 font-bold mt-1">({timeoutVal}s)</p>
+                  <p className="text-xs md:text-sm text-white/95 font-bold mt-1">({timeoutVal}s)</p>
                 )}
               </div>
             );
@@ -597,6 +599,11 @@ const PianoReactionGame = () => {
       try { return { ...defaults, ...JSON.parse(saved) }; } catch (e) {}
     }
     return defaults;
+  });
+
+  const [disabledKeys, setDisabledKeys] = useState(() => {
+    const saved = localStorage.getItem("piano_disabled_keys");
+    return saved ? JSON.parse(saved) : [];
   });
 
   // Base state settings
@@ -888,26 +895,56 @@ const PianoReactionGame = () => {
     const targetGameType = exerciseType;
     const targetGameName = exerciseType === 'piano_finger' ? 'Piano - Finger Dexterity' : 'Piano - Wrist Movement';
 
+    let activeFingerTimeouts = null;
+    if (platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) {
+      activeFingerTimeouts = {
+        leftPinky: -1, leftRing: -1, leftMiddle: -1, leftIndex: -1,
+        rightIndex: -1, rightMiddle: -1, rightRing: -1, rightPinky: -1,
+        thumb: -1, index: -1, middle: -1, ring: -1, pinky: -1
+      };
+      activeKeys.forEach(k => {
+        const f = getFingerForKey(k);
+        if (f) {
+          activeFingerTimeouts[f] = disabledKeys.includes(k) ? 0 : (fingerTimeouts[f] || 5);
+        }
+      });
+    }
+
     gameSessionBuffer.init(targetGameType, targetGameName);
     gameSessionBuffer.update({
       levelspan: currentLevelSpan,
       mode: platform,
-      fingerTimeouts: platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger') ? fingerTimeouts : null,
+      fingerTimeouts: activeFingerTimeouts,
       laptopMovements: [],
       mobileMovements: []
     });
     showNextSection();
   };
 
-  const showNextSection = () => {
-    let randomSection = currentSection;
-    if (activeKeys.length > 1) {
+  const toggleDisableKey = (key) => {
+    setDisabledKeys(prev => {
+      const newKeys = prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key];
+      localStorage.setItem("piano_disabled_keys", JSON.stringify(newKeys));
+      return newKeys;
+    });
+  };
+
+  const showNextSection = (prevSection = null) => {
+    const current = prevSection !== null ? prevSection : currentSection;
+    const validSections = activeKeys.map((key, idx) => ({ key, idx })).filter(item => !disabledKeys.includes(item.key));
+    
+    let randomSection = current;
+    if (validSections.length > 1) {
       do {
-        randomSection = Math.floor(Math.random() * activeKeys.length);
-      } while (randomSection === currentSection);
+        const randomIndex = Math.floor(Math.random() * validSections.length);
+        randomSection = validSections[randomIndex].idx;
+      } while (randomSection === current);
+    } else if (validSections.length === 1) {
+      randomSection = validSections[0].idx;
     } else {
       randomSection = 0;
     }
+    
     setCurrentSection(randomSection);
     setSectionStartTime(Date.now());
     setAttemptCount((old) => old + 1);
@@ -937,7 +974,7 @@ const PianoReactionGame = () => {
         setTimeout(() => {
           setFeedbackSection(null);
           setFeedbackType(null);
-          showNextSection();
+          showNextSection(randomSection);
         }, 300);
       }
     }, timeoutSec * 1000);
@@ -986,7 +1023,7 @@ const PianoReactionGame = () => {
     setTimeout(() => {
       setFeedbackSection(null);
       setFeedbackType(null);
-      showNextSection();
+      showNextSection(currentSection);
     }, 300);
   };
 
@@ -1030,7 +1067,7 @@ const PianoReactionGame = () => {
     setTimeout(() => {
       setFeedbackSection(null);
       setFeedbackType(null);
-      showNextSection();
+      showNextSection(currentSection);
     }, 300);
   };
 
@@ -1088,10 +1125,25 @@ const PianoReactionGame = () => {
       return acc;
     }, 0);
     const finalScore = Math.max(0, calculatedScore);
+    let activeFingerTimeouts = null;
+    if (platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger')) {
+      activeFingerTimeouts = {
+        leftPinky: -1, leftRing: -1, leftMiddle: -1, leftIndex: -1,
+        rightIndex: -1, rightMiddle: -1, rightRing: -1, rightPinky: -1,
+        thumb: -1, index: -1, middle: -1, ring: -1, pinky: -1
+      };
+      activeKeys.forEach(k => {
+        const f = getFingerForKey(k);
+        if (f) {
+          activeFingerTimeouts[f] = disabledKeys.includes(k) ? 0 : (fingerTimeouts[f] || 5);
+        }
+      });
+    }
+
     gameSessionBuffer.update({
       sessionScore: finalScore,
       mode: platform,
-      fingerTimeouts: platform === 'mobile' || (platform === 'laptop' && exerciseType === 'piano_finger') ? fingerTimeouts : null
+      fingerTimeouts: activeFingerTimeouts
     });
   };
 
@@ -1127,7 +1179,7 @@ const PianoReactionGame = () => {
         setTimeout(() => {
           setFeedbackSection(null);
           setFeedbackType(null);
-          showNextSection();
+          showNextSection(currentSection);
         }, 300);
       }
     }, timeoutSec * 1000);
@@ -1199,6 +1251,7 @@ const PianoReactionGame = () => {
         keyboardLayout={keyboardLayout}
         mobileKeysCount={mobileKeysCount}
         fingerTimeouts={fingerTimeouts}
+        disabledKeys={disabledKeys}
       />
     );
   }
@@ -1225,7 +1278,7 @@ const PianoReactionGame = () => {
           </div>
           <div className="flex gap-3 mt-4 md:mt-0">
             <button
-              onClick={() => navigate(-1)}
+              onClick={() => navigate(user?.type === 'doctor' ? '/doctor/dashboard' : '/patient/dashboard')}
               className="p-3 bg-white/20 hover:bg-white/40 rounded-xl transition text-white backdrop-blur-md shadow-lg"
               title="Go back to Dashboard"
             >
@@ -1255,15 +1308,24 @@ const PianoReactionGame = () => {
                 
                 {/* Visual piano grid */}
                 <div className="border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden mt-6 h-36 flex bg-gray-50 dark:bg-gray-950">
-                  {activeKeys.map((key, idx) => (
-                    <div
-                      key={idx}
-                      className="border-r border-gray-200 dark:border-gray-800 last:border-0 flex-1 flex flex-col items-center justify-center p-2 bg-white dark:bg-gray-900 hover:bg-gray-50"
-                    >
-                      <span className="text-2xl font-black text-gray-400">{key}</span>
-                      <span className="text-[10px] text-gray-400 font-mono mt-1">{noteNames[idx]}</span>
-                    </div>
-                  ))}
+                  {activeKeys.map((key, idx) => {
+                    const isDisabled = disabledKeys.includes(key);
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => toggleDisableKey(key)}
+                        className={`cursor-pointer border-r border-gray-200 dark:border-gray-800 last:border-0 flex-1 flex flex-col items-center justify-center p-2 transition-all ${
+                          isDisabled 
+                            ? 'bg-gray-200 dark:bg-gray-800 opacity-50 grayscale' 
+                            : 'bg-white dark:bg-gray-900 hover:bg-gray-50'
+                        }`}
+                      >
+                        <span className="text-2xl font-black text-gray-400">{key}</span>
+                        <span className="text-[10px] text-gray-400 font-mono mt-1">{noteNames[idx]}</span>
+                        {isDisabled && <span className="text-[9px] text-red-500 font-bold mt-1">DISABLED</span>}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -1295,7 +1357,7 @@ const PianoReactionGame = () => {
                 <label className="block text-sm font-black uppercase tracking-wider text-gray-400 mb-3">
                   1. Select Device Platform
                 </label>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <button
                     onClick={() => {
                       setPlatform('laptop');
@@ -1333,7 +1395,7 @@ const PianoReactionGame = () => {
                     ⌚ <strong>Wrist Movement Mode only:</strong> Mobile screen touch keys are locked to wrist tap coordinates tracking. Keyboard triggers are disabled.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <button
                       onClick={() => setExerciseType('piano_finger')}
                       className={`flex flex-col items-center p-4 rounded-2xl font-bold border-2 transition-all text-center ${
@@ -1368,7 +1430,7 @@ const PianoReactionGame = () => {
                   <label className="block text-sm font-black uppercase tracking-wider text-gray-400 mb-3">
                     3. Keyboard Hand Layout
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
                       onClick={() => setKeyboardLayout('both')}
                       className={`py-3 rounded-xl font-bold border transition-all text-xs md:text-sm ${
@@ -1452,87 +1514,108 @@ const PianoReactionGame = () => {
                     
                     {/* Render corresponding active finger sliders */}
                     <div className="space-y-4">
-                      {/* Thumb - ONLY in Mobile 5 Keys */}
-                      {platform === 'mobile' && mobileKeysCount === 5 && (
-                        <div>
-                          <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                            <span>👍 Thumb (Key A)</span>
-                            <span className="text-blue-500">{fingerTimeouts.thumb}s</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="1"
-                            max="10"
-                            value={fingerTimeouts.thumb}
-                            onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, thumb: parseInt(e.target.value) })}
-                            className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                          />
-                        </div>
+                      {platform === 'mobile' && (
+                        <>
+                          {mobileKeysCount === 5 && (
+                            <div className={`mt-2 transition-all ${disabledKeys.includes('A') ? 'opacity-50 grayscale' : ''}`}>
+                              <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 items-center">
+                                <div className="flex items-center gap-2">
+                                  <input type="checkbox" checked={!disabledKeys.includes('A')} onChange={() => toggleDisableKey('A')} className="w-5 h-5 accent-blue-500 cursor-pointer" />
+                                  <span className={disabledKeys.includes('A') ? 'line-through' : ''}>👍 Thumb (Key A)</span>
+                                </div>
+                                <span className="text-blue-500">{fingerTimeouts.thumb}s</span>
+                              </div>
+                              <input
+                                type="range" min="1" max="10" value={fingerTimeouts.thumb}
+                                onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, thumb: parseInt(e.target.value) })}
+                                disabled={disabledKeys.includes('A')}
+                                className={`w-full h-3 md:h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none ${disabledKeys.includes('A') ? 'cursor-not-allowed' : 'cursor-pointer accent-blue-500'}`}
+                              />
+                            </div>
+                          )}
+                          {[
+                            { id: 'index', label: '✍️ Index Finger', key: getFingerKeyLabel('index') },
+                            { id: 'middle', label: '🖐️ Middle Finger', key: getFingerKeyLabel('middle') },
+                            { id: 'ring', label: '💍 Ring Finger', key: getFingerKeyLabel('ring') },
+                            { id: 'pinky', label: '🤙 Pinky', key: getFingerKeyLabel('pinky') }
+                          ].map(f => (
+                            <div key={f.id} className={`mt-2 transition-all ${disabledKeys.includes(f.key) ? 'opacity-50 grayscale' : ''}`}>
+                              <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 items-center">
+                                <div className="flex items-center gap-2">
+                                  <input type="checkbox" checked={!disabledKeys.includes(f.key)} onChange={() => toggleDisableKey(f.key)} className="w-5 h-5 accent-blue-500 cursor-pointer" />
+                                  <span className={disabledKeys.includes(f.key) ? 'line-through' : ''}>{f.label} (Key {f.key})</span>
+                                </div>
+                                <span className="text-blue-500">{fingerTimeouts[f.id]}s</span>
+                              </div>
+                              <input
+                                type="range" min="1" max="10" value={fingerTimeouts[f.id]}
+                                onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, [f.id]: parseInt(e.target.value) })}
+                                disabled={disabledKeys.includes(f.key)}
+                                className={`w-full h-3 md:h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none ${disabledKeys.includes(f.key) ? 'cursor-not-allowed' : 'cursor-pointer accent-blue-500'}`}
+                              />
+                            </div>
+                          ))}
+                        </>
                       )}
-                      
-                      {/* Index Finger */}
-                      <div>
-                        <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                          <span>✍️ Index Finger (Key {getFingerKeyLabel('index')})</span>
-                          <span className="text-blue-500">{fingerTimeouts.index}s</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="1"
-                          max="10"
-                          value={fingerTimeouts.index}
-                          onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, index: parseInt(e.target.value) })}
-                          className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                        />
-                      </div>
 
-                      {/* Middle Finger */}
-                      <div>
-                        <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                          <span>🖐️ Middle Finger (Key {getFingerKeyLabel('middle')})</span>
-                          <span className="text-blue-500">{fingerTimeouts.middle}s</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="1"
-                          max="10"
-                          value={fingerTimeouts.middle}
-                          onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, middle: parseInt(e.target.value) })}
-                          className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                        />
-                      </div>
-
-                      {/* Ring Finger */}
-                      <div>
-                        <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                          <span>💍 Ring Finger (Key {getFingerKeyLabel('ring')})</span>
-                          <span className="text-blue-500">{fingerTimeouts.ring}s</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="1"
-                          max="10"
-                          value={fingerTimeouts.ring}
-                          onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, ring: parseInt(e.target.value) })}
-                          className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                        />
-                      </div>
-
-                      {/* Pinky */}
-                      <div>
-                        <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">
-                          <span>🤙 Pinky (Key {getFingerKeyLabel('pinky')})</span>
-                          <span className="text-blue-500">{fingerTimeouts.pinky}s</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="1"
-                          max="10"
-                          value={fingerTimeouts.pinky}
-                          onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, pinky: parseInt(e.target.value) })}
-                          className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                        />
-                      </div>
+                      {platform === 'laptop' && (
+                        <>
+                          {['both', 'left'].includes(keyboardLayout) && (
+                            <>
+                              <h4 className="text-sm font-bold text-gray-800 dark:text-gray-200 mt-4 mb-2 border-b pb-1 dark:border-gray-800">Left Hand</h4>
+                              {[
+                                { id: 'leftPinky', label: '🤙 L Pinky', key: 'A' },
+                                { id: 'leftRing', label: '💍 L Ring', key: 'S' },
+                                { id: 'leftMiddle', label: '🖐️ L Middle', key: 'D' },
+                                { id: 'leftIndex', label: '✍️ L Index', key: 'F' }
+                              ].map(f => (
+                                <div key={f.id} className={`ml-2 mt-2 transition-all ${disabledKeys.includes(f.key) ? 'opacity-50 grayscale' : ''}`}>
+                                  <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 items-center">
+                                    <div className="flex items-center gap-2">
+                                      <input type="checkbox" checked={!disabledKeys.includes(f.key)} onChange={() => toggleDisableKey(f.key)} className="w-5 h-5 accent-blue-500 cursor-pointer" />
+                                      <span className={disabledKeys.includes(f.key) ? 'line-through' : ''}>{f.label} (Key {f.key})</span>
+                                    </div>
+                                    <span className="text-blue-500">{fingerTimeouts[f.id]}s</span>
+                                  </div>
+                                  <input
+                                    type="range" min="1" max="10" value={fingerTimeouts[f.id]}
+                                    onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, [f.id]: parseInt(e.target.value) })}
+                                    disabled={disabledKeys.includes(f.key)}
+                                    className={`w-full h-3 md:h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none ${disabledKeys.includes(f.key) ? 'cursor-not-allowed' : 'cursor-pointer accent-blue-500'}`}
+                                  />
+                                </div>
+                              ))}
+                            </>
+                          )}
+                          {['both', 'right'].includes(keyboardLayout) && (
+                            <>
+                              <h4 className="text-sm font-bold text-gray-800 dark:text-gray-200 mt-6 mb-2 border-b pb-1 dark:border-gray-800">Right Hand</h4>
+                              {[
+                                { id: 'rightIndex', label: '✍️ R Index', key: 'H' },
+                                { id: 'rightMiddle', label: '🖐️ R Middle', key: 'J' },
+                                { id: 'rightRing', label: '💍 R Ring', key: 'K' },
+                                { id: 'rightPinky', label: '🤙 R Pinky', key: 'L' }
+                              ].map(f => (
+                                <div key={f.id} className={`ml-2 mt-2 transition-all ${disabledKeys.includes(f.key) ? 'opacity-50 grayscale' : ''}`}>
+                                  <div className="flex justify-between text-xs font-bold text-gray-700 dark:text-gray-300 mb-1 items-center">
+                                    <div className="flex items-center gap-2">
+                                      <input type="checkbox" checked={!disabledKeys.includes(f.key)} onChange={() => toggleDisableKey(f.key)} className="w-5 h-5 accent-blue-500 cursor-pointer" />
+                                      <span className={disabledKeys.includes(f.key) ? 'line-through' : ''}>{f.label} (Key {f.key})</span>
+                                    </div>
+                                    <span className="text-blue-500">{fingerTimeouts[f.id]}s</span>
+                                  </div>
+                                  <input
+                                    type="range" min="1" max="10" value={fingerTimeouts[f.id]}
+                                    onChange={(e) => saveFingerTimeoutsToStorage({ ...fingerTimeouts, [f.id]: parseInt(e.target.value) })}
+                                    disabled={disabledKeys.includes(f.key)}
+                                    className={`w-full h-3 md:h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none ${disabledKeys.includes(f.key) ? 'cursor-not-allowed' : 'cursor-pointer accent-blue-500'}`}
+                                  />
+                                </div>
+                              ))}
+                            </>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                 ) : (

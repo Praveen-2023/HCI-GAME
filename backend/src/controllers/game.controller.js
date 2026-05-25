@@ -1,6 +1,7 @@
 const User = require('../models/user.model');
 const GameSession = require('../models/gameSession.model');
 const BoardDrawingSession = require('../models/boardDrawingSession.model');
+const PianoSession = require('../models/pianoSession.model');
 
 const toNumber = (value, fallback = undefined) => {
   const number = Number(value);
@@ -189,22 +190,38 @@ exports.saveGameSession = async (req, res) => {
       coords = normalizePath(coordinates);
     }
 
-    const newSession = new GameSession({
-      user: userId,
-      gameType: type,
-      gameName: name,
-      time: new Date(),
-      levelspan: levelspan,
-      sessionScore: sessionScore,
-      systemMetrics: systemMetrics || undefined,
-      coordinates: type === 'board_drawing' ? coords : (coordinates || undefined),
-      boardDrawingAttempts: type === 'board_drawing' ? attempts : (boardDrawingAttempts || undefined),
-      play: playData || [],
-      mode: mode || 'laptop',
-      fingerTimeouts: fingerTimeouts || undefined,
-      laptopMovements: laptopMovements || undefined,
-      mobileMovements: mobileMovements || undefined
-    });
+    let newSession;
+    
+    if (type === 'type1' || type.startsWith('piano_')) {
+      newSession = new PianoSession({
+        user: userId,
+        gameType: type,
+        gameName: name,
+        time: new Date(),
+        levelspan: levelspan,
+        sessionScore: sessionScore,
+        systemMetrics: systemMetrics || undefined,
+        coordinates: coordinates || undefined,
+        play: playData || [],
+        mode: mode || 'laptop',
+        fingerTimeouts: fingerTimeouts || undefined,
+        laptopMovements: laptopMovements || undefined,
+        mobileMovements: mobileMovements || undefined
+      });
+    } else {
+      newSession = new GameSession({
+        user: userId,
+        gameType: type,
+        gameName: name,
+        time: new Date(),
+        levelspan: levelspan,
+        sessionScore: sessionScore,
+        systemMetrics: systemMetrics || undefined,
+        coordinates: type === 'board_drawing' ? coords : (coordinates || undefined),
+        boardDrawingAttempts: type === 'board_drawing' ? attempts : (boardDrawingAttempts || undefined),
+        play: playData || []
+      });
+    }
 
     await newSession.save();
 
@@ -254,15 +271,16 @@ exports.getDetailedAnalytics = async (req, res) => {
       });
     }
 
-    const gameSessions = await GameSession.find({ user: userId });
-    const boardSessions = await BoardDrawingSession.find({ user: userId });
-    const sessions = [...gameSessions, ...boardSessions].sort((a, b) => new Date(a.time) - new Date(b.time));
+    const gameSessions = await GameSession.find({ user: userId }).lean();
+    const boardSessions = await BoardDrawingSession.find({ user: userId }).lean();
+    const pianoSessions = await PianoSession.find({ user: userId }).lean();
+    const sessions = [...gameSessions, ...boardSessions, ...pianoSessions].sort((a, b) => new Date(a.time) - new Date(b.time));
     
     // Group by game type
     const grouped = sessions.reduce((acc, session) => {
       let gType = session.gameType;
       let gName = session.gameName;
-      if (gType === 'piano_finger' || gType === 'piano_ankle') {
+      if (gType === 'type1' || gType.startsWith('piano_')) {
         gType = 'type1';
         gName = 'Piano Reaction Game';
       }
@@ -383,15 +401,16 @@ exports.getBasicStats = async (req, res) => {
       });
     }
 
-    const gameSessions = await GameSession.find({ user: userId });
-    const boardSessions = await BoardDrawingSession.find({ user: userId });
-    const sessions = [...gameSessions, ...boardSessions].sort((a, b) => new Date(a.time) - new Date(b.time));
+    const gameSessions = await GameSession.find({ user: userId }).lean();
+    const boardSessions = await BoardDrawingSession.find({ user: userId }).lean();
+    const pianoSessions = await PianoSession.find({ user: userId }).lean();
+    const sessions = [...gameSessions, ...boardSessions, ...pianoSessions].sort((a, b) => new Date(a.time) - new Date(b.time));
     
     // Group by game type
     const grouped = sessions.reduce((acc, session) => {
       let gType = session.gameType;
       let gName = session.gameName;
-      if (gType === 'piano_finger' || gType === 'piano_ankle') {
+      if (gType === 'type1' || gType.startsWith('piano_')) {
         gType = 'type1';
         gName = 'Piano Reaction Game';
       }
